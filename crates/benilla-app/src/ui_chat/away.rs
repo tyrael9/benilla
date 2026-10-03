@@ -181,6 +181,7 @@ pub(crate) fn reconcile_afk_mirror(
 /// nothing. Jump is here but not in `player::follow`'s cancel set: two separate reference tables.
 pub(crate) fn movement_clears_afk(
     binds: Res<crate::bindings::BindingsState>,
+    gamepad: Option<Res<crate::gamepad::GamepadState>>,
     cvars: Res<crate::cvars::Cvars>,
     script: Option<NonSendMut<benilla_ui::script::UiScript>>,
     commands: Res<crate::net::NetCommands>,
@@ -191,7 +192,7 @@ pub(crate) fn movement_clears_afk(
     if !mirror.is_afk() || cvars.flag("autoClearAFK") == Some(false) {
         return;
     }
-    let moved = [
+    let keyboard_moved = [
         Input::Jump,
         Input::MoveForward,
         Input::MoveBackward,
@@ -202,6 +203,12 @@ pub(crate) fn movement_clears_afk(
     ]
     .iter()
     .any(|&c| binds.just_pressed(c));
+
+    let gamepad_moved = gamepad.is_some_and(|g| {
+        g.move_stick.length_squared() > 0.01
+    });
+
+    let moved = keyboard_moved || gamepad_moved;
     if !moved {
         return;
     }

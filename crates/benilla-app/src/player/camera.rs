@@ -592,6 +592,22 @@ impl CameraControl {
     pub(crate) fn self_fade(&self) -> f32 {
         self.self_fade_alpha
     }
+
+    pub(crate) fn world_mouse_left_down(&self) -> bool {
+        self.world_mouse.down(LookButton::Left)
+    }
+
+    pub(crate) fn world_mouse_right_down(&self) -> bool {
+        self.world_mouse.down(LookButton::Right)
+    }
+
+    pub(crate) fn world_mouse_left_held(&self) -> bool {
+        self.world_mouse.held(LookButton::Left)
+    }
+
+    pub(crate) fn world_mouse_right_held(&self) -> bool {
+        self.world_mouse.held(LookButton::Right)
+    }
 }
 
 /// The mouse-look mode: `Right` turns the character with the camera, `Left` orbits around it.
@@ -617,25 +633,27 @@ impl LookButton {
 /// locked cursor cannot steal it. `MouselookStart` sets the TurnOrAction bit with no button.
 #[derive(Default)]
 pub(super) struct WorldMouse {
-    /// Held by the world right now, indexed by [`LookButton`].
-    held: [bool; 2],
-    /// Took its down edge from the world this frame, same index.
-    down: [bool; 2],
-    /// `MouselookStart` holds the TurnOrAction channel (`0x515090(1, 1, …)` at `0x514231`).
+    physical_held: [bool; 2],
+    physical_down: [bool; 2],
+
+    virtual_held: [bool; 2],
+    virtual_down: [bool; 2],
+    virtual_world: [bool; 2],
+
     scripted: bool,
-    /// This frame's `MouselookStart` raised the channel.
     scripted_rise: bool,
-    /// A `MouselookStart`/`Stop` ran this frame; each disarms the pending click (`0x514810(0)`).
     disarmed: bool,
 }
 
 impl WorldMouse {
     pub(super) fn held(&self, b: LookButton) -> bool {
-        self.held[b as usize]
+        let i = b as usize;
+        self.physical_held[i] || self.virtual_held[i]
     }
 
     pub(super) fn down(&self, b: LookButton) -> bool {
-        self.down[b as usize]
+        let i = b as usize;
+        self.physical_down[i] || self.virtual_down[i]
     }
 
     /// The TurnOrAction channel, `[InputControl+4] & 1`: the world's right button, or a
@@ -670,13 +688,55 @@ impl WorldMouse {
 
     /// Latch this frame; `world_press` says whether a down edge belongs to the world. A held bit
     /// rides to its release, including a cover's emptying of the button planes.
-    fn update(&mut self, buttons: &ButtonInput<MouseButton>, world_press: bool) {
+    fn update(
+        &mut self,
+        buttons: &ButtonInput<MouseButton>,
+        world_press: bool,
+    ) {
         self.scripted_rise = false;
         self.disarmed = false;
+
         for b in [LookButton::Right, LookButton::Left] {
             let i = b as usize;
-            self.down[i] = world_press && buttons.just_pressed(b.button());
-            self.held[i] = (self.held[i] || self.down[i]) && buttons.pressed(b.button());
+
+            self.physical_down[i] =
+                world_press && buttons.just_pressed(b.button());
+
+            self.physical_held[i] =
+                (self.physical_held[i] || self.physical_down[i])
+                    && buttons.pressed(b.button());
+        }
+    }
+
+    fn update_virtual(
+        &mut self,
+        left: bool,
+        right: bool,
+        world_press: bool,
+    ) {
+        let pressed = [right, left];
+
+        for b in [LookButton::Right, LookButton::Left] {
+            let i = b as usize;
+
+            let now = pressed[i];
+            let was = self.virtual_held[i];
+
+            if now && !was {
+                self.virtual_world[i] = world_press;
+            }
+
+            self.virtual_down[i] =
+                now
+                    && !was
+                    && self.virtual_world[i];
+
+            self.virtual_held[i] =
+                now && self.virtual_world[i];
+
+            if !now {
+                self.virtual_world[i] = false;
+            }
         }
     }
 
@@ -684,12 +744,14 @@ impl WorldMouse {
     /// a right drag in flight, whose release then clears nothing.
     fn mouselook(&mut self, on: bool) {
         self.disarmed = true;
+
         if on {
             self.scripted_rise |= !self.turn();
             self.scripted = true;
         } else {
             self.scripted = false;
-            self.held[LookButton::Right as usize] = false;
+            self.physical_held[LookButton::Right as usize] = false;
+            self.virtual_world[LookButton::Right as usize] = false;
         }
     }
 }
@@ -708,6 +770,7 @@ pub(super) fn latch_world_mouse(
     // ground-targeting veto (`+0x3c`, `0x7cba30`) arrives through `PointerOverUi`
     // (`UiScript::set_nameplate_hit_test_veto`). The wheel still zooms over a plate.
     pointer_over_ui: Res<crate::ui_script::PointerOverUi>,
+    gamepad: Res<crate::gamepad::GamepadState>,
     mut rig: ResMut<CameraControl>,
     cameras: Query<&Camera, With<FlyCam>>,
     window: Single<&Window, With<PrimaryWindow>>,
@@ -722,9 +785,31 @@ pub(super) fn latch_world_mouse(
         return;
     };
     let over_ui = pointer_over_ui.0;
-    let world_press = rig.look.is_some() || (cursor_in_viewport(&window, camera) && !over_ui);
+
+    let world_press =
+        rig.look.is_some()
+            || (cursor_in_viewport(&window, camera) && !over_ui);
+
     let wm = &mut rig.world_mouse;
+
+    // Physical mouse.
     wm.update(&buttons, world_press);
+
+    // Gamepad virtual mouse.
+    //
+    // LT/ZL is the virtual-mouse modifier. A/B are the virtual
+    // left/right mouse buttons.
+    let virtual_left =
+        gamepad.zl > 0.5 && gamepad.a;
+
+    let virtual_right =
+        gamepad.zl > 0.5 && gamepad.b;
+
+    wm.update_virtual(
+        virtual_left,
+        virtual_right,
+        world_press,
+    );
     // The script's calls, made since the last latch, before this frame's release.
     for on in calls {
         wm.mouselook(on);

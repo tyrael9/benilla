@@ -56,6 +56,7 @@ pub(crate) fn stamp_input(
     mut buttons: MessageReader<MouseButtonInput>,
     mut wheel: MessageReader<MouseWheel>,
     motion: Res<AccumulatedMouseMotion>,
+    gamepad: Option<Res<crate::gamepad::GamepadState>>,
 ) {
     // `count()` and a bitwise `|` drain every reader, or unread messages warm the clock next frame.
     // `repeat` is category 0xa, which has no store; `Released` never carries the flag.
@@ -63,7 +64,29 @@ pub(crate) fn stamp_input(
         | (buttons.read().count() != 0)
         | (wheel.read().count() != 0)
         | (motion.delta != Vec2::ZERO);
-    if any {
+
+    let gamepad_active = gamepad.is_some_and(|g| {
+        g.move_stick.length_squared() > 0.01
+            || g.look_stick.length_squared() > 0.01
+            || g.a
+            || g.b
+            || g.x
+            || g.y
+            || g.l
+            || g.r
+            || g.zl > 0.01
+            || g.zr > 0.01
+            || g.minus
+            || g.plus
+            || g.l3
+            || g.r3
+            || g.dpad_up
+            || g.dpad_down
+            || g.dpad_left
+            || g.dpad_right
+    });
+
+    if any || gamepad_active {
         last.0 = time.elapsed();
     }
 }

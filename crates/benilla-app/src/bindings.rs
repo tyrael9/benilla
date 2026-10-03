@@ -538,6 +538,29 @@ fn latch_and_dispatch(
             GamepadButton::Y => gamepad.prev_y,
         };
 
+        let mouse_mode_button =
+            gamepad.zl > 0.5
+                && matches!(button, GamepadButton::A | GamepadButton::B);
+
+        if mouse_mode_button {
+            // A/B are owned by virtual mouse mode while ZL is held.
+            // If they were previously being used as ActionButtons,
+            // release them so the ActionBar binding cannot remain latched.
+            if state
+                .latched
+                .iter()
+                .any(|(k, _)| *k == Held::Gamepad(button))
+            {
+                release(
+                    &mut state,
+                    &mut script,
+                    Held::Gamepad(button),
+                );
+            }
+
+            continue;
+        }
+
         if pressed && !was_pressed {
             if !state
                 .latched
@@ -559,6 +582,7 @@ fn latch_and_dispatch(
             );
         }
     }
+
 
     // ── The stuck-latch sweep ── a release the window never saw: a latch whose base key reads up
     // unlatches now and runs its up-half. The reference's two bulk clears land here too, since

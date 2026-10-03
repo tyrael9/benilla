@@ -185,6 +185,7 @@ impl PressPick {
 /// clear the hover, so what stands here is last frame's pick at the same cursor, the press's.
 pub(crate) fn latch_press_pick(
     buttons: Res<ButtonInput<MouseButton>>,
+    rig: Res<crate::player::camera::CameraControl>,
     hovered: Res<Hovered>,
     object: Res<HoveredObject>,
     occlusion: Res<PickOcclusion>,
@@ -194,8 +195,16 @@ pub(crate) fn latch_press_pick(
 ) {
     // Either button's down edge arms a pick (`0x514810`, clickModes 1 and 2); a chord does not
     // re-latch, as `0x51481a` refuses to arm while the other button is held.
-    let left = buttons.just_pressed(MouseButton::Left) && !buttons.pressed(MouseButton::Right);
-    let right = buttons.just_pressed(MouseButton::Right) && !buttons.pressed(MouseButton::Left);
+    let left =
+        (buttons.just_pressed(MouseButton::Left)
+            || rig.world_mouse_left_down())
+            && !rig.world_mouse_right_held();
+
+    let right =
+        (buttons.just_pressed(MouseButton::Right)
+            || rig.world_mouse_right_down())
+            && !rig.world_mouse_left_held();
+    
     if !(left || right) {
         return;
     }

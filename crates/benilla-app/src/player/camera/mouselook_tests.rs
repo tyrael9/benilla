@@ -40,6 +40,7 @@ fn look_frame(
     };
     run_look_session(
         &motion,
+        Vec2::ZERO,
         both,
         &mut rig,
         &mut cam,

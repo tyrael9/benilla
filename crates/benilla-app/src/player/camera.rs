@@ -795,6 +795,7 @@ pub(crate) struct CameraPivot {
 /// [`WorldMouse::channel`] is held, so a `MouselookStart` runs the right button's session.
 pub(super) fn run_look_session(
     mouse_motion: &AccumulatedMouseMotion,
+    gamepad_look: Vec2,
     both_buttons: bool,
     rig: &mut CameraControl,
     cam: &mut FlyCam,
@@ -824,6 +825,10 @@ pub(super) fn run_look_session(
     } else {
         Vec2::ZERO
     };
+
+    const GAMEPAD_LOOK_SPEED: f32 = 6.0;
+    let gamepad_motion = gamepad_look * GAMEPAD_LOOK_SPEED;
+
     // A chord is a both-button run, never a select: the reference kills the pending click and arms
     // none while another primary's binding is held (`0x514ac1`, `0x51481a`). A `MouselookStart` or
     // `Stop` disarms it too, ahead of the channel's move (`0x514810(0)` stores mode 0 unguarded,
@@ -899,8 +904,8 @@ pub(super) fn run_look_session(
     }
 
     // Look rotation; a right-drag also turns the character.
-    if let Some(active) = rig.look {
-        let delta = motion;
+    if rig.look.is_some() || gamepad_look != Vec2::ZERO {
+        let delta = motion + gamepad_motion;
         let d_yaw = -delta.x * yaw_rate;
         cam.yaw += d_yaw;
         // `mouseInvertPitch` flips only the pitch axis.
@@ -922,8 +927,10 @@ pub(super) fn run_look_session(
         ) {
             cam.pitch = (cam.pitch + d_pitch).clamp(-CAM_PITCH_LIMIT, CAM_PITCH_LIMIT);
         }
-        if active == LookButton::Right || both_buttons {
-            *face_yaw = cam.yaw;
+        if let Some(active) = rig.look {
+            if active == LookButton::Right || both_buttons {
+                *face_yaw = cam.yaw;
+            }
         }
     }
     // Freelook is right-held mouse-look or a both-button run, which steers like it; a left-drag

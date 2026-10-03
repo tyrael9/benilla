@@ -27,6 +27,7 @@ mod area_trigger;
 mod asset_churn;
 mod aura_visual;
 mod bindings;
+mod gamepad;
 mod blob_shadow;
 mod bowstring;
 mod camera_shake;
@@ -249,7 +250,19 @@ fn launch(build: BuildId, extend: Option<Extension<'_>>) -> AppExit {
     // `App` exists, so a panic while plugins build is reported too.
     crash::install(build);
 
+    // Initialize SDL before Bevy/winit starts its macOS event loop.
+    // SDL HIDAPI enumeration must not happen from a Bevy Startup system.
+    println!("========== BEFORE SDL INIT ==========");
+    let sdl_gamepad = crate::gamepad::init_sdl();
+    println!("========== AFTER SDL INIT ==========");
+
     let mut app = App::new();
+
+    // SDL's macOS objects are !Send + !Sync, so keep them as a NonSend resource.
+    if let Some(sdl_gamepad) = sdl_gamepad {
+        app.insert_non_send_resource(sdl_gamepad);
+    }
+
     // The panel footer and the build banner read the stamp back.
     app.insert_resource(build);
     // Static-scene transform tracking pinned on: the default threshold re-decides every frame with

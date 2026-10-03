@@ -67,6 +67,7 @@ pub(crate) enum ScanSide {
     /// Mode 4 (`0x493f15`): not us, then `0x4918e0`, party (`0x4e7f70`) or raid roster
     /// (`0x4baee0`).
     Raid,
+    Interactable,
 }
 
 impl ScanSide {
@@ -78,6 +79,7 @@ impl ScanSide {
             NearestMode::Friend => Self::Friend,
             NearestMode::PartyMember => Self::Party,
             NearestMode::RaidMember => Self::Raid,
+            NearestMode::Interactable => Self::Interactable,
         }
     }
 }
@@ -264,6 +266,7 @@ impl TargetScan<'_, '_> {
                 g.party_slots().any(|m| m.guid == guid)
                     || (g.group_type == 1 && g.members.iter().any(|m| m.guid == guid))
             }),
+            ScanSide::Interactable => true,
         }
     }
 
@@ -325,7 +328,20 @@ impl TargetScan<'_, '_> {
         };
         let mut out = Vec::new();
         for (entity, net, guid_c, tf, store) in &self.units {
-            if !matches!(net.kind, EntityKind::Unit | EntityKind::Player) {
+            if !matches!(
+                (side, net.kind),
+                (
+                    ScanSide::Interactable,
+                    EntityKind::Unit
+                        | EntityKind::Player
+                        | EntityKind::GameObject
+                        | EntityKind::Corpse
+                )
+                | (
+                    ScanSide::Enemy | ScanSide::Friend | ScanSide::Party | ScanSide::Raid,
+                    EntityKind::Unit | EntityKind::Player
+                )
+            ) {
                 continue;
             }
             if !self.is_valid(side, guid_c.0, store, self_store) {
@@ -337,6 +353,7 @@ impl TargetScan<'_, '_> {
                         ScanSide::Friend => "REJECT dead-or-unassistable",
                         ScanSide::Party => "REJECT not-in-party",
                         ScanSide::Raid => "REJECT not-in-party-or-raid",
+                        ScanSide::Interactable => "REJECT not-interactable",
                     },
                 );
                 continue;

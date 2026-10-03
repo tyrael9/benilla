@@ -64,6 +64,7 @@ pub(super) fn control(
         Res<scoped_view::ScopedView>,
         // The loading cover blanks input at the source; a gesture in flight is unwound below.
         Res<crate::loading_screen::LoadingScreen>,
+        Res<crate::gamepad::GamepadState>,
     ),
     mut commands: Commands,
     mut player: ResMut<Player>,
@@ -107,6 +108,7 @@ pub(super) fn control(
     let self_guid = speed_capsule.7 .0;
     let scoped = &speed_capsule.8;
     let covered = speed_capsule.9.covering();
+    let gamepad = &speed_capsule.10;
     // Far sight turns the auto-follow off: our facing is not "behind" for a body we only watch.
     let follow_cfg = camera::FollowConfig {
         style: if view_subject.remote.is_some() {
@@ -230,6 +232,7 @@ pub(super) fn control(
     let focused = window.focused;
     run_look_session(
         mouse_motion,
+        gamepad.look_axis(),
         both_buttons,
         &mut rig,
         &mut cam,
@@ -363,6 +366,8 @@ pub(super) fn control(
         let may_translate = mover.may_translate(player.modes.rooted);
         let axes = input::move_axes(
             binds,
+            gamepad,
+            cam.yaw,
             &buttons,
             &mut player,
             &rig,
@@ -373,6 +378,7 @@ pub(super) fn control(
         let input::MoveAxes {
             fwd: fwd_axis,
             side: side_axis,
+            analog,
             mouselook,
             turning,
             translating,
@@ -381,7 +387,7 @@ pub(super) fn control(
             turn_right,
             ..
         } = axes;
-        if fwd_axis != 0 || side_axis != 0 {
+        if fwd_axis != 0 || side_axis != 0 || analog != Vec2::ZERO {
             net.13.moved();
         }
         if mouselook {
@@ -423,17 +429,21 @@ pub(super) fn control(
         let move_fwd = flat(face_rot * Vec3::NEG_Z);
         let move_right = flat(face_rot * Vec3::X);
         let mut dir = Vec3::ZERO;
-        // One step in the net axis's sign, as the emitter issues one START in `sign(axis)`.
+
         match fwd_axis.signum() {
             1 => dir += move_fwd,
             -1 => dir -= move_fwd,
             _ => {}
         }
-        // Strafe likewise; a cancelled pair is no strafe.
+
         match side_axis.signum() {
             1 => dir += move_right,
             -1 => dir -= move_right,
             _ => {}
+        }
+
+        if analog != Vec2::ZERO {
+            dir = dir.normalize_or_zero();
         }
         // Translation dies here, but a root leaves turning live: the reference's allow-list permits
         // the turn, pitch, run/walk and SetFacing commands (`0x615c71`, `0x618054`). A stun, which
@@ -490,6 +500,11 @@ pub(super) fn control(
                 0
             },
         );
+        let speed = if analog != Vec2::ZERO {
+            speed * analog.length()
+        } else {
+            speed
+        };
         // `Jump` (`0x513bd0`) inlines `0x5144e0` and `0x514560`, which is `may_translate` term for
         // term: health, root and stand state 7. Hover's refusal is the movement handler's
         // (`0x7c623a`), which keeps the mounted flourish reachable while hovering.

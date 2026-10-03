@@ -33,6 +33,7 @@ use benilla_ui::script::UiScript;
 
 use crate::char_select::InWorldGated;
 use crate::ui_script::{PlayerUiHover, PointerOverUiPanel, UiKeyboardCapture};
+use crate::gamepad::GamepadState;
 
 pub(crate) mod chord;
 mod layout;
@@ -96,6 +97,14 @@ pub(crate) struct BindingsState {
     down: Vec<KeyCode>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum GamepadButton {
+    A,
+    B,
+    X,
+    Y,
+}
+
 /// The physical input a latch waits on: a keyboard key by its code, not its name, so its release
 /// ends the latch whatever the layout names it by then.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -103,6 +112,7 @@ enum Held {
     Key(KeyCode),
     Mouse(MouseButton),
     Wheel,
+    Gamepad(GamepadButton),
 }
 
 impl BindingsState {
@@ -330,6 +340,7 @@ fn latch_and_dispatch(
     keys: Res<ButtonInput<KeyCode>>,
     buttons: Res<ButtonInput<MouseButton>>,
     scroll: Res<AccumulatedMouseScroll>,
+    gamepad: Res<GamepadState>,
     capture: Res<UiKeyboardCapture>,
     hover: Res<PlayerUiHover>,
     // The chrome flag; only the wheel branch reads it.
@@ -394,7 +405,7 @@ fn latch_and_dispatch(
     // reference's `0x424790` wipe, so a key held across an alt-tab re-latches on its next repeat.
     state
         .down
-        .retain(|&kc| physically_down(Held::Key(kc), &keys, &buttons));
+        .retain(|&kc| physically_down(Held::Key(kc), &keys, &buttons, &gamepad));
 
     // ── Keyboard ── press edges run their command, gated on ownership and the capture arm;
     // release edges unlatch and run the `runOnUp` up-half.
@@ -508,13 +519,54 @@ fn latch_and_dispatch(
         }
     }
 
+    // ── Gamepad face buttons ──
+    // A/B/X/Y directly drive ActionButton 1/2/3/4.
+    // We reuse the normal Lua binding path so ActionBar behavior,
+    // modifiers, paging, cooldowns, etc. stay in the existing UI system.
+    let gamepad_buttons = [
+        (GamepadButton::A, gamepad.a, "ACTIONBUTTON1"),
+        (GamepadButton::B, gamepad.b, "ACTIONBUTTON2"),
+        (GamepadButton::X, gamepad.x, "ACTIONBUTTON3"),
+        (GamepadButton::Y, gamepad.y, "ACTIONBUTTON4"),
+    ];
+
+    for (button, pressed, command) in gamepad_buttons {
+        let was_pressed = match button {
+            GamepadButton::A => gamepad.prev_a,
+            GamepadButton::B => gamepad.prev_b,
+            GamepadButton::X => gamepad.prev_x,
+            GamepadButton::Y => gamepad.prev_y,
+        };
+
+        if pressed && !was_pressed {
+            if !state
+                .latched
+                .iter()
+                .any(|(k, _)| *k == Held::Gamepad(button))
+            {
+                press(
+                    &mut state,
+                    &mut script,
+                    command,
+                    Held::Gamepad(button),
+                );
+            }
+        } else if !pressed && was_pressed {
+            release(
+                &mut state,
+                &mut script,
+                Held::Gamepad(button),
+            );
+        }
+    }
+
     // ── The stuck-latch sweep ── a release the window never saw: a latch whose base key reads up
     // unlatches now and runs its up-half. The reference's two bulk clears land here too, since
     // bevy zeroes `ButtonInput` for both (see the clears above). UI keyboard focus never reaches
     // here.
     let mut stuck: Vec<Held> = Vec::new();
     for (k, _) in &state.latched {
-        if !physically_down(*k, &keys, &buttons) && !stuck.contains(k) {
+        if !physically_down(*k, &keys, &buttons, &gamepad) && !stuck.contains(k) {
             stuck.push(*k);
         }
     }
@@ -537,6 +589,7 @@ fn physically_down(
     key: Held,
     keys: &ButtonInput<KeyCode>,
     buttons: &ButtonInput<MouseButton>,
+    gamepad: &GamepadState,
 ) -> bool {
     match key {
         Held::Key(KeyCode::Enter) => {
@@ -546,6 +599,12 @@ fn physically_down(
         Held::Mouse(b) => buttons.pressed(b),
         // A notch is a press and a release in one frame; it is never "held".
         Held::Wheel => false,
+        Held::Gamepad(b) => match b {
+            GamepadButton::A => gamepad.a,
+            GamepadButton::B => gamepad.b,
+            GamepadButton::X => gamepad.x,
+            GamepadButton::Y => gamepad.y,
+        },
     }
 }
 

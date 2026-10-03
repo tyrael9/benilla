@@ -320,11 +320,12 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     // ── The main table `0x83de68` ──────────────────────────────────────────────────────────
     // The four `TargetNearest*` shims are byte-identical but for the mode: argument 1 through
     // `0x6f1c10` with default 0 is the reverse flag, then `0x493f60(reverse, mode)`.
-    let nearest: [(&str, NearestMode); 4] = [
+    let nearest: [(&str, NearestMode); 5] = [
         ("TargetNearestEnemy", NearestMode::Enemy),
         ("TargetNearestFriend", NearestMode::Friend),
         ("TargetNearestPartyMember", NearestMode::PartyMember),
         ("TargetNearestRaidMember", NearestMode::RaidMember),
+        ("TargetNearestInteractable", NearestMode::Interactable),
     ];
     for (name, mode) in nearest {
         g.set(

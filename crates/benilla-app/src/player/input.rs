@@ -5,6 +5,7 @@
 use bevy::prelude::*;
 
 use super::{camera, state, CameraControl, LookButton, Player};
+use crate::gamepad::GamepadState;
 
 /// What [`look_input`] read off the mouse and the bindings, before the look session runs.
 pub(super) struct LookInput {
@@ -80,6 +81,14 @@ pub(super) fn look_input(
     }
 }
 
+fn discrete_axis(value: f32) -> i32 {
+    if value.abs() < 0.15 {
+        0
+    } else {
+        value.signum() as i32
+    }
+}
+
 /// This frame's netted movement axes and modes; every consumer downstream reads these, not keys.
 #[derive(Clone, Copy)]
 pub(super) struct MoveAxes {
@@ -87,6 +96,9 @@ pub(super) struct MoveAxes {
     pub fwd: i32,
     /// Net strafe, positive right: Q/E always, A/D only while mouse-looking.
     pub side: i32,
+    /// Gamepad left stick, after deadzone.
+    /// X = strafe right, Y = forward.
+    pub analog: Vec2,
     /// Right-mouse (or both-button) held: A/D strafe and the facing tracks the camera.
     pub mouselook: bool,
     /// A keyboard turn is held and allowed (a stun refuses it).
@@ -105,6 +117,8 @@ pub(super) struct MoveAxes {
 /// Decodes the movement keys into [`MoveAxes`], running the autorun latch and its cancel set.
 pub(super) fn move_axes(
     binds: &crate::bindings::BindingsState,
+    gamepad: &GamepadState,
+    camera_yaw: f32,
     buttons: &ButtonInput<MouseButton>,
     player: &mut Player,
     rig: &CameraControl,
@@ -172,21 +186,46 @@ pub(super) fn move_axes(
     let strafe_right = binds.pressed(crate::bindings::Input::StrafeRight);
     let turn_left = binds.pressed(crate::bindings::Input::TurnLeft);
     let turn_right = binds.pressed(crate::bindings::Input::TurnRight);
+
     let side_axis = i32::from(strafe_right) - i32::from(strafe_left)
         + if mouselook {
             i32::from(turn_right) - i32::from(turn_left)
         } else {
             0
         };
-    // A keyboard turn yaws left-positive, like the mouse, and never while `may_turn` is down: the
-    // reference skips its turn emitter `0x514f50`, and stops one in flight, behind `0x514755`. A
-    // corpse fails the precondition both predicates share (`0x5144e0`), so it cannot turn either.
-    let turning = !mouselook && may_turn && (turn_left || turn_right);
-    let translating = fwd_axis != 0 || side_axis != 0;
 
+    let analog = if gamepad.zl > 0.5 {
+        Vec2::ZERO
+    } else {
+        gamepad.move_axis()
+    };
+
+    let (net_fwd_axis, net_side_axis) = if analog != Vec2::ZERO {
+        // Left stick = WASD semantics.
+        let fwd = discrete_axis(analog.y);
+        let side = discrete_axis(analog.x);
+
+        // While the left stick is held, always face the camera.
+        if may_turn {
+            player.face_yaw = camera_yaw;
+        }
+
+        (fwd, side)
+    } else {
+        (fwd_axis, side_axis)
+    };
+
+    let turning = !mouselook && may_turn && (turn_left || turn_right);
+
+    let translating =
+        fwd_axis != 0
+            || side_axis != 0
+            || analog != Vec2::ZERO;
+    
     MoveAxes {
-        fwd: fwd_axis,
-        side: side_axis,
+        fwd: net_fwd_axis,
+        side: net_side_axis,
+        analog,
         mouselook,
         turning,
         translating,

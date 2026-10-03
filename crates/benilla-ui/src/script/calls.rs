@@ -65,9 +65,14 @@ pub enum NearestMode {
     PartyMember,
     /// Mode 4, `TargetNearestRaidMember`: a party or raid member other than us.
     RaidMember,
+    Interactable,
 }
 
 impl UiScript {
+    pub fn push_script_call(&mut self, call: ScriptCall) {
+        self.model_mut().script_calls.push(call);
+    }
+
     /// Take every queued call, in call order.
     pub fn take_script_calls(&mut self) -> Vec<ScriptCall> {
         std::mem::take(&mut self.model_mut().script_calls)

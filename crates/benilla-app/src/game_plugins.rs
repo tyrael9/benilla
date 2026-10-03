@@ -165,6 +165,7 @@ impl PluginGroup for GamePlugins {
             .add(crate::cvars::CvarPlugin)
             .add(crate::console::ConsolePlugin)
             .add(crate::bindings::BindingsPlugin)
+            .add(crate::gamepad::GamepadPlugin)
             .add(UiUnitPlugin)
             .add(UiPartyPlugin)
             .add(UiDuelPlugin)

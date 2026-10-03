@@ -80,7 +80,7 @@ fn feed_wheel(
 pub(super) fn feed_ui_input(
     script: Option<NonSendMut<UiScript>>,
     // Carries the `wl_display` the Wayland clipboard backend needs, once winit has a surface.
-    window: Query<(&Window, Option<&bevy::window::RawHandleWrapper>), With<PrimaryWindow>>,
+    mut window: Query<(&mut Window, Option<&bevy::window::RawHandleWrapper>), With<PrimaryWindow>>,
     buttons: Res<ButtonInput<MouseButton>>,
     // The wheel travel and its carried notch fraction, one param for clippy's argument ceiling.
     (scroll, mut notches): (Res<AccumulatedMouseScroll>, ResMut<WheelNotches>),
@@ -96,7 +96,11 @@ pub(super) fn feed_ui_input(
     layout: Res<crate::bindings::LayoutNames>,
     // The uiScale dial folded into the seam scale.
     ui_scale: Res<super::UiScaleCvar>,
+    time: Res<Time>,
+    mut gamepad: ResMut<crate::gamepad::GamepadState>,
 ) {
+    const GAMEPAD_MOUSE_SPEED: f32 = 700.0;
+
     let (keyboard, keys, capture, clipboard) = (&mut kbd.0, &kbd.1, &mut kbd.2, &mut kbd.3);
     let world_pick = pointer.world_pick();
     // The OS pointer is not ours while a probe drives a gesture through the real pointer path or a
@@ -116,7 +120,7 @@ pub(super) fn feed_ui_input(
         payload_held.0 = false;
         return;
     };
-    let Ok((window, raw_handle)) = window.single() else {
+    let Ok((mut window, raw_handle)) = window.single_mut() else {
         capture.typing = false;
         capture.arrows_fall_through = false;
         capture.consumed.clear();
@@ -131,76 +135,214 @@ pub(super) fn feed_ui_input(
     let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
     let alt = keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight);
     script.set_modifiers(shift, ctrl, alt);
-    // ── Mouse ── A cursor off the window skips only the mouse feed.
-    // The headless hover probe's aim stands in for a missing cursor, so `PointerOverUi` rises and
-    // falls over a panel in an automated run as it does for a person; a real pointer always wins.
-    if let Some(cursor) = window
-        .cursor_position()
-        .or_else(crate::target::hover_probe_point)
-        .filter(|_| !synthetic)
-    {
-        // The window cursor is logical px, y-down from the top left; the UI is y-up in 768-high
-        // units under uiScale: flip through the window height, then undo the extract seam's scale.
+    // ── Mouse ──────────────────────────────────────────────────────────────────────────────────
+    //
+    // LT turns the left stick into a virtual mouse.
+    //
+    // virtual_mouse_x/y use the same y-up coordinate system as UiScript::mouse_move().
+    // The real OS cursor uses y-down window coordinates, so we convert when warping it.
+
+    let gamepad_mouse = gamepad.zl > 0.5;
+
+    if gamepad_mouse {
         let s = super::seam_scale(window.height(), ui_scale.0);
-        let (x, y) = (cursor.x / s, (window.height() - cursor.y) / s);
-        // `WOW_HIT_COST=1` meters this call's per-frame hit-test rebuild, one line a second.
-        static HIT_COST: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        let metering =
-            *HIT_COST.get_or_init(|| std::env::var("WOW_HIT_COST").as_deref() == Ok("1"));
-        let t0 = metering.then(std::time::Instant::now);
-        // The world frame is mouse-enabled, so an addon's handlers can hover it, but its hit is
-        // the world's: camera look, world clicks and hover targeting stay live over it.
+
+        if !gamepad.virtual_mouse_initialized {
+            if let Some(cursor) = window.cursor_position() {
+                // Real cursor coordinates are y-down.
+                gamepad.virtual_mouse_x = cursor.x / s;
+                gamepad.virtual_mouse_y = (window.height() - cursor.y) / s;
+            } else {
+                gamepad.virtual_mouse_x = window.width() / (2.0 * s);
+                gamepad.virtual_mouse_y = window.height() / (2.0 * s);
+            }
+
+            gamepad.virtual_mouse_initialized = true;
+        }
+
+        // Left stick → virtual mouse.
+        //
+        // move_stick is still the normal gamepad stick value. Movement itself is
+        // suppressed in move_axes() while LT is held.
+        let dt = time.delta_secs();
+
+        let stick = if gamepad.move_stick.length() < 0.15 {
+            Vec2::ZERO
+        } else {
+            gamepad.move_stick
+        };
+
+        gamepad.virtual_mouse_x +=
+            stick.x * GAMEPAD_MOUSE_SPEED * dt;
+
+        gamepad.virtual_mouse_y +=
+            stick.y * GAMEPAD_MOUSE_SPEED * dt;
+
+        let max_x = window.width() / s;
+        let max_y = window.height() / s;
+
+        gamepad.virtual_mouse_x =
+            gamepad.virtual_mouse_x.clamp(0.0, max_x);
+
+        gamepad.virtual_mouse_y =
+            gamepad.virtual_mouse_y.clamp(0.0, max_y);
+
+        let x = gamepad.virtual_mouse_x;
+        let y = gamepad.virtual_mouse_y;
+
+        // Move the actual OS cursor.
+        //
+        // UiScript: y-up
+        // Window cursor: y-down
+        let cursor_x = x * s;
+        let cursor_y = window.height() - y * s;
+
+        window.set_cursor_position(Some(Vec2::new(
+            cursor_x,
+            cursor_y,
+        )));
+
+        // Feed the same position into the WoW UI.
         hover.0 = script
             .mouse_move(x, y)
             .filter(|id| !script.is_world_frame(*id));
-        if let Some(t0) = t0 {
-            use std::sync::atomic::{AtomicU64, Ordering};
-            static ACC_US: AtomicU64 = AtomicU64::new(0);
-            static CALLS: AtomicU64 = AtomicU64::new(0);
-            static LAST: AtomicU64 = AtomicU64::new(0);
-            ACC_US.fetch_add(t0.elapsed().as_micros() as u64, Ordering::Relaxed);
-            let calls = CALLS.fetch_add(1, Ordering::Relaxed) + 1;
-            let now_s = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            if LAST.swap(now_s, Ordering::Relaxed) != now_s && calls > 1 {
-                let us = ACC_US.swap(0, Ordering::Relaxed);
-                let n = CALLS.swap(0, Ordering::Relaxed);
-                eprintln!(
-                    "[hit-cost] mouse_move_us/frame={:.1} frames={n}",
-                    us as f64 / n.max(1) as f64
+
+        // A → virtual left mouse button.
+        if gamepad.a && !gamepad.prev_a {
+            script.mouse_button(x, y, "LeftButton", true);
+            gamepad.virtual_mouse_left_down = true;
+        }
+
+        if !gamepad.a && gamepad.prev_a {
+            script.mouse_button(x, y, "LeftButton", false);
+            gamepad.virtual_mouse_left_down = false;
+        }
+
+        // B → virtual right mouse button.
+        if gamepad.b && !gamepad.prev_b {
+            script.mouse_button(x, y, "RightButton", true);
+            gamepad.virtual_mouse_right_down = true;
+        }
+
+        if !gamepad.b && gamepad.prev_b {
+            script.mouse_button(x, y, "RightButton", false);
+            gamepad.virtual_mouse_right_down = false;
+        }
+    } else {
+        // LT released.
+        //
+        // Always release any virtual mouse button that might still be held.
+        // This prevents a stuck drag if LT is released before A/B.
+
+        if gamepad.virtual_mouse_left_down {
+            script.mouse_button(
+                gamepad.virtual_mouse_x,
+                gamepad.virtual_mouse_y,
+                "LeftButton",
+                false,
+            );
+            gamepad.virtual_mouse_left_down = false;
+        }
+
+        if gamepad.virtual_mouse_right_down {
+            script.mouse_button(
+                gamepad.virtual_mouse_x,
+                gamepad.virtual_mouse_y,
+                "RightButton",
+                false,
+            );
+            gamepad.virtual_mouse_right_down = false;
+        }
+
+        gamepad.virtual_mouse_initialized = false;
+
+        // Normal physical mouse path.
+        if let Some(cursor) = window
+            .cursor_position()
+            .or_else(crate::target::hover_probe_point)
+            .filter(|_| !synthetic)
+        {
+            let s = super::seam_scale(window.height(), ui_scale.0);
+            let (x, y) = (
+                cursor.x / s,
+                (window.height() - cursor.y) / s,
+            );
+
+            static HIT_COST: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            let metering =
+                *HIT_COST.get_or_init(|| std::env::var("WOW_HIT_COST").as_deref() == Ok("1"));
+            let t0 = metering.then(std::time::Instant::now);
+
+            hover.0 = script
+                .mouse_move(x, y)
+                .filter(|id| !script.is_world_frame(*id));
+
+            if let Some(t0) = t0 {
+                use std::sync::atomic::{AtomicU64, Ordering};
+
+                static ACC_US: AtomicU64 = AtomicU64::new(0);
+                static CALLS: AtomicU64 = AtomicU64::new(0);
+                static LAST: AtomicU64 = AtomicU64::new(0);
+
+                ACC_US.fetch_add(
+                    t0.elapsed().as_micros() as u64,
+                    Ordering::Relaxed,
                 );
-            }
-        }
-        for (btn, name) in UI_MOUSE_BUTTONS {
-            if buttons.just_pressed(btn) {
-                // A left press that would drop into the world (`world_drop_click`: any payload over
-                // terrain or nothing) is consumed now: the drop fires on the release, but the world
-                // click-pick and camera orbit act on the press. Over an object the reference runs
-                // SELECT with the payload still held.
-                if btn == MouseButton::Left && hover.0.is_none() {
-                    use benilla_ui::script::WorldPick;
-                    let would_drop =
-                        script.cursor_payload().is_some() && world_pick != WorldPick::Object;
-                    if would_drop {
-                        click_consumed.0 = true;
-                    }
+
+                let calls = CALLS.fetch_add(1, Ordering::Relaxed) + 1;
+
+                let now_s = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+
+                if LAST.swap(now_s, Ordering::Relaxed) != now_s && calls > 1 {
+                    let us = ACC_US.swap(0, Ordering::Relaxed);
+                    let n = CALLS.swap(0, Ordering::Relaxed);
+
+                    eprintln!(
+                        "[hit-cost] mouse_move_us/frame={:.1} frames={n}",
+                        us as f64 / n.max(1) as f64
+                    );
                 }
-                script.mouse_button(x, y, name, true);
             }
-            if buttons.just_released(btn) {
-                script.mouse_button(x, y, name, false);
+
+            for (btn, name) in UI_MOUSE_BUTTONS {
+                if buttons.just_pressed(btn) {
+                    if btn == MouseButton::Left && hover.0.is_none() {
+                        use benilla_ui::script::WorldPick;
+
+                        let would_drop =
+                            script.cursor_payload().is_some()
+                                && world_pick != WorldPick::Object;
+
+                        if would_drop {
+                            click_consumed.0 = true;
+                        }
+                    }
+
+                    script.mouse_button(x, y, name, true);
+                }
+
+                if buttons.just_released(btn) {
+                    script.mouse_button(x, y, name, false);
+                }
             }
+
+            feed_wheel(
+                &mut script,
+                &mut notches,
+                x,
+                y,
+                &scroll,
+            );
+        } else if !synthetic {
+            if hover.0.take().is_some() {
+                script.mouse_move(f32::MIN, f32::MIN);
+            }
+
+            script.pointer_left_window();
         }
-        feed_wheel(&mut script, &mut notches, x, y, &scroll);
-    } else if !synthetic {
-        // The OS pointer left: leave the hovered frame once, and disarm any press or drag every
-        // frame, since no release ends it and a stale gesture would fire on re-entry.
-        if hover.0.take().is_some() {
-            script.mouse_move(f32::MIN, f32::MIN);
-        }
-        script.pointer_left_window();
     }
 
     // ── Keyboard capture gate ── read after the mouse feed (a click may have just focused a box)

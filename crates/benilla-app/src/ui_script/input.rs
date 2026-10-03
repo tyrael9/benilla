@@ -137,7 +137,7 @@ pub(super) fn feed_ui_input(
     script.set_modifiers(shift, ctrl, alt);
     // ── Mouse ──────────────────────────────────────────────────────────────────────────────────
     //
-    // LT turns the left stick into a virtual mouse.
+    // LT turns the right stick into a virtual mouse.
     //
     // virtual_mouse_x/y use the same y-up coordinate system as UiScript::mouse_move().
     // The real OS cursor uses y-down window coordinates, so we convert when warping it.
@@ -160,22 +160,22 @@ pub(super) fn feed_ui_input(
             gamepad.virtual_mouse_initialized = true;
         }
 
-        // Left stick → virtual mouse.
+        // Right stick → virtual mouse.
         //
-        // move_stick is still the normal gamepad stick value. Movement itself is
-        // suppressed in move_axes() while LT is held.
+        // look_stick is still the normal gamepad stick value. Camera itself is
+        // suppressed in look_axes() while LT is held.
         let dt = time.delta_secs();
 
-        let stick = if gamepad.move_stick.length() < 0.15 {
+        let stick = if gamepad.look_stick.length() < 0.15 {
             Vec2::ZERO
         } else {
-            gamepad.move_stick
+            gamepad.look_stick
         };
 
         gamepad.virtual_mouse_x +=
             stick.x * GAMEPAD_MOUSE_SPEED * dt;
 
-        gamepad.virtual_mouse_y +=
+        gamepad.virtual_mouse_y -=
             stick.y * GAMEPAD_MOUSE_SPEED * dt;
 
         let max_x = window.width() / s;

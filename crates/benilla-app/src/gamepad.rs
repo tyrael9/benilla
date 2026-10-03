@@ -182,6 +182,10 @@ pub(crate) fn init_sdl() -> Option<SdlGamepad> {
 #[derive(Component)]
 struct GamepadDebugText;
 
+fn gamepad_debug_enabled() -> bool {
+    std::env::var("BENILLA_GAMEPAD_DEBUG").as_deref() == Ok("1")
+}
+
 
 // ============================================================
 // Plugin
@@ -192,7 +196,10 @@ pub(crate) struct GamepadPlugin;
 impl Plugin for GamepadPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GamepadState>()
-            .add_systems(Startup, setup_gamepad_debug_overlay)
+            .add_systems(
+                Startup, 
+                setup_gamepad_debug_overlay.run_if(gamepad_debug_enabled),
+            )
             .add_systems(
                 Update,
                 poll_gamepad.before(crate::bindings::BindingSet),
@@ -204,7 +211,10 @@ impl Plugin for GamepadPlugin {
                     .before(crate::script_calls::apply_script_calls),
             )
             .add_systems(Update, gamepad_rt_interact)
-            .add_systems(Update, update_gamepad_debug_overlay);
+            .add_systems(
+                Update, 
+                update_gamepad_debug_overlay.run_if(gamepad_debug_enabled),
+            );
     }
 }
 

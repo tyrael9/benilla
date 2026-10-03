@@ -194,11 +194,7 @@ pub(super) fn move_axes(
             0
         };
 
-    let analog = if gamepad.zl > 0.5 {
-        Vec2::ZERO
-    } else {
-        gamepad.move_axis()
-    };
+    let analog = gamepad.move_axis();
 
     let (net_fwd_axis, net_side_axis) = if analog != Vec2::ZERO {
         // Left stick = WASD semantics.

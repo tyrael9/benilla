@@ -232,7 +232,11 @@ pub(super) fn control(
     let focused = window.focused;
     run_look_session(
         mouse_motion,
-        gamepad.look_axis(),
+        if gamepad.zl > 0.5 {
+            Vec2::ZERO
+        } else {
+            gamepad.look_axis()
+        },
         both_buttons,
         &mut rig,
         &mut cam,

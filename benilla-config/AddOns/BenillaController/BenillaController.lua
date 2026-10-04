@@ -724,7 +724,46 @@ local function UpdateControllerButton(
 
 
     -- --------------------------------------------------------
+    -- ActionButton state
+    --
+    -- Vanilla 1.12:
+    --
+    -- IsCurrentAction()
+    -- IsAutoRepeatAction()
+    --
+    -- drives the checked/pressed state.
+    --
+    -- This is what makes queued abilities such as
+    -- Warrior Heroic Strike highlight correctly.
+    -- --------------------------------------------------------
+
+    local isCurrent =
+        IsCurrentAction(action)
+
+    local isAutoRepeat =
+        IsAutoRepeatAction(action)
+
+    if isCurrent or isAutoRepeat then
+
+        button:SetChecked(1)
+
+    else
+
+        button:SetChecked(0)
+    end
+
+
+    -- --------------------------------------------------------
     -- Usable / range
+    --
+    -- Copy the Vanilla 1.12 ActionButton semantics:
+    --
+    -- usable          -> white
+    -- not enough rage -> blue
+    -- out of range    -> red
+    -- otherwise       -> gray
+    --
+    -- We intentionally keep our existing red range color.
     -- --------------------------------------------------------
 
     if icon then
@@ -747,15 +786,7 @@ local function UpdateControllerButton(
                 0.45
             )
 
-        elseif usable == 0 then
-
-            icon:SetVertexColor(
-                0.45,
-                0.45,
-                0.45
-            )
-
-        else
+        elseif usable then
 
             local inRange =
                 IsActionInRange(action)
@@ -776,6 +807,24 @@ local function UpdateControllerButton(
                     1.0
                 )
             end
+
+        elseif noMana then
+
+            -- Vanilla ActionButton's "not enough
+            -- mana/rage/energy" state.
+            icon:SetVertexColor(
+                0.5,
+                0.5,
+                1.0
+            )
+
+        else
+
+            icon:SetVertexColor(
+                0.4,
+                0.4,
+                0.4
+            )
         end
     end
 

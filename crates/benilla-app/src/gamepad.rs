@@ -2,6 +2,30 @@ use bevy::prelude::*;
 use sdl3::gamepad::{Axis, Button, Gamepad};
 use benilla_ui::script::{NearestMode, ScriptCall, UiScript};
 
+// gamepad.rs
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum GamepadButton {
+    A,
+    B,
+    X,
+    Y,
+
+    L,
+    R,
+
+    Minus,
+    Plus,
+
+    L3,
+    R3,
+
+    DPadUp,
+    DPadDown,
+    DPadLeft,
+    DPadRight,
+}
+
 
 // ============================================================
 // Gamepad state
@@ -9,6 +33,7 @@ use benilla_ui::script::{NearestMode, ScriptCall, UiScript};
 
 #[derive(Resource, Clone, Copy, Debug, Default)]
 pub(crate) struct GamepadState {
+    pub connected: bool,
     pub move_stick: Vec2,
     pub look_stick: Vec2,
 
@@ -26,21 +51,28 @@ pub(crate) struct GamepadState {
     // Shoulder buttons
     pub l: bool,
     pub r: bool,
+    pub prev_l: bool,
+    pub prev_r: bool,
 
     // Triggers
     pub zl: f32,
     pub zr: f32,
 
+    pub prev_zl: f32,
     pub prev_zr: f32,
 
     // System buttons
     pub minus: bool,
     pub plus: bool,
 
+    pub prev_minus: bool,
+    pub prev_plus: bool,
+
     // Stick buttons
     pub l3: bool,
     pub r3: bool,
 
+    pub prev_l3: bool,
     pub prev_r3: bool,
 
     // D-pad
@@ -69,6 +101,93 @@ impl GamepadState {
 
     pub(crate) fn look_axis(&self) -> Vec2 {
         apply_deadzone(self.look_stick, 0.15)
+    }
+
+    pub(crate) fn button_down(&self, button: GamepadButton) -> bool {
+        match button {
+            GamepadButton::A => self.a,
+            GamepadButton::B => self.b,
+            GamepadButton::X => self.x,
+            GamepadButton::Y => self.y,
+
+            GamepadButton::L => self.l,
+            GamepadButton::R => self.r,
+
+            GamepadButton::Minus => self.minus,
+            GamepadButton::Plus => self.plus,
+
+            GamepadButton::L3 => self.l3,
+            GamepadButton::R3 => self.r3,
+
+            GamepadButton::DPadUp => self.dpad_up,
+            GamepadButton::DPadDown => self.dpad_down,
+            GamepadButton::DPadLeft => self.dpad_left,
+            GamepadButton::DPadRight => self.dpad_right,
+        }
+    }
+
+    pub(crate) fn button_was_down(&self, button: GamepadButton) -> bool {
+        match button {
+            GamepadButton::A => self.prev_a,
+            GamepadButton::B => self.prev_b,
+            GamepadButton::X => self.prev_x,
+            GamepadButton::Y => self.prev_y,
+
+            GamepadButton::L => self.prev_l,
+            GamepadButton::R => self.prev_r,
+
+            GamepadButton::Minus => self.prev_minus,
+            GamepadButton::Plus => self.prev_plus,
+
+            GamepadButton::L3 => self.prev_l3,
+            GamepadButton::R3 => self.prev_r3,
+
+            GamepadButton::DPadUp => self.prev_dpad_up,
+            GamepadButton::DPadDown => self.prev_dpad_down,
+            GamepadButton::DPadLeft => self.prev_dpad_left,
+            GamepadButton::DPadRight => self.prev_dpad_right,
+        }
+    }
+
+    pub(crate) fn button_pressed(&self, button: GamepadButton) -> bool {
+        self.button_down(button) && !self.button_was_down(button)
+    }
+
+    pub(crate) fn button_released(&self, button: GamepadButton) -> bool {
+        !self.button_down(button) && self.button_was_down(button)
+    }
+
+    pub(crate) fn lua_snapshot(&self) -> benilla_ui::script::GamepadLuaState {
+        benilla_ui::script::GamepadLuaState {
+            connected: self.connected,
+
+            a: self.a,
+            b: self.b,
+            x: self.x,
+            y: self.y,
+
+            l: self.l,
+            r: self.r,
+
+            minus: self.minus,
+            plus: self.plus,
+
+            l3: self.l3,
+            r3: self.r3,
+
+            dpad_up: self.dpad_up,
+            dpad_down: self.dpad_down,
+            dpad_left: self.dpad_left,
+            dpad_right: self.dpad_right,
+
+            zl: self.zl,
+            zr: self.zr,
+
+            left_x: self.move_stick.x,
+            left_y: self.move_stick.y,
+            right_x: self.look_stick.x,
+            right_y: self.look_stick.y,
+        }
     }
 }
 
@@ -206,6 +325,10 @@ impl Plugin for GamepadPlugin {
             )
             .add_systems(
                 Update,
+                sync_gamepad_to_lua.after(poll_gamepad),
+            )
+            .add_systems(
+                Update,
                 gamepad_r3_target_nearest_interactable
                     .after(poll_gamepad)
                     .before(crate::script_calls::apply_script_calls),
@@ -264,8 +387,11 @@ fn poll_gamepad(
     mut state: ResMut<GamepadState>,
 ) {
     let Some(sdl_gamepad) = sdl_gamepad else {
+        state.connected = false;
         return;
     };
+
+    state.connected = true;
 
     // SDL is not running its own event loop.
     //
@@ -281,7 +407,13 @@ fn poll_gamepad(
     state.prev_dpad_down = state.dpad_down;
     state.prev_dpad_left = state.dpad_left;
     state.prev_dpad_right = state.dpad_right;
+    state.prev_l = state.l;
+    state.prev_r = state.r;
 
+    state.prev_minus = state.minus;
+    state.prev_plus = state.plus;
+    state.prev_l3 = state.l3;
+    state.prev_r3 = state.r3;
 
     // --------------------------------------------------------
     // Analog sticks
@@ -335,6 +467,7 @@ fn poll_gamepad(
     // ZL / ZR are analog axes in SDL's Gamepad API.
     // --------------------------------------------------------
 
+    state.prev_zl = state.zl;
     state.zl = normalize_trigger(
         gamepad.axis(Axis::TriggerLeft),
     );
@@ -356,7 +489,6 @@ fn poll_gamepad(
     // --------------------------------------------------------
     // Stick buttons
     // --------------------------------------------------------
-    state.prev_r3 = state.r3;
     state.l3 = gamepad.button(Button::LeftStick);
     state.r3 = gamepad.button(Button::RightStick);
 
@@ -399,6 +531,17 @@ fn gamepad_r3_target_nearest_interactable(
         mode: NearestMode::Interactable,
         reverse: false,
     });
+}
+
+fn sync_gamepad_to_lua(
+    gamepad: Res<GamepadState>,
+    mut script: Option<NonSendMut<UiScript>>,
+) {
+    let Some(mut script) = script else {
+        return;
+    };
+
+    script.set_gamepad_state(gamepad.lua_snapshot());
 }
 
 

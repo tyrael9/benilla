@@ -143,6 +143,8 @@ mod worldmap;
 mod worldstate;
 mod worn_display;
 mod zone_text;
+mod gamepad;
+pub use model::GamepadLuaState;
 
 pub use action::{ActionSlot, ActionState, ActionUse};
 pub use addon::AddOnInfo;
@@ -501,6 +503,7 @@ impl UiScript {
         channel::install(&lua)?;
         chat_window::install(&lua)?;
         client::install(&lua)?;
+        gamepad::install(&lua)?;
         screenshot::install(&lua)?;
         stdlib::sandbox(&lua)?;
         // Before the stdlib layer, so its aliases bind the 5.0-shaped functions.
@@ -1238,6 +1241,13 @@ impl UiScript {
     /// A registered [`FontObject`] by name: its resolved paint.
     pub fn font_object(&self, name: &str) -> Option<FontObject> {
         self.model_ref().font_object(name).cloned()
+    }
+
+    pub fn set_gamepad_state(
+        &mut self,
+        state: GamepadLuaState,
+    ) {
+        self.model_mut().gamepad = state;
     }
 
     // ── internals ────────────────────────────────────────────────────────────────────────────

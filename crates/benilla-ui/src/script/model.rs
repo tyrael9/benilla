@@ -29,6 +29,38 @@ pub type TextureSizeProbe = Box<dyn Fn(&str) -> Option<(u32, u32)>>;
 /// The host's answer to whether a font path loads.
 pub type FontProbe = Box<dyn Fn(&str) -> bool>;
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct GamepadLuaState {
+    pub connected: bool,
+
+    pub a: bool,
+    pub b: bool,
+    pub x: bool,
+    pub y: bool,
+
+    pub l: bool,
+    pub r: bool,
+
+    pub minus: bool,
+    pub plus: bool,
+
+    pub l3: bool,
+    pub r3: bool,
+
+    pub dpad_up: bool,
+    pub dpad_down: bool,
+    pub dpad_left: bool,
+    pub dpad_right: bool,
+
+    pub zl: f32,
+    pub zr: f32,
+
+    pub left_x: f32,
+    pub left_y: f32,
+    pub right_x: f32,
+    pub right_y: f32,
+}
+
 /// Minted id to handle, indexed directly: ids are dense and every scripted call looks one up.
 #[derive(Debug, Clone)]
 pub(crate) struct IdMap<T>(Vec<Option<T>>);
@@ -958,6 +990,8 @@ pub(crate) struct Model {
     pub(crate) framerate: f64,
     /// `(shift, ctrl, alt)` for `Is*KeyDown`, pushed before the frame's mouse events.
     pub(crate) modifiers: (bool, bool, bool),
+    /// gamepad state for Lua.
+    pub(crate) gamepad: GamepadLuaState,
 }
 
 impl Model {
@@ -1463,6 +1497,7 @@ impl Model {
             reputation_collapsed: HashSet::new(),
             reputation_selected: None,
             reputation_sends: Vec::new(),
+            gamepad: GamepadLuaState::default(),
         }
     }
 

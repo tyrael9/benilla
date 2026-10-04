@@ -1,0 +1,113 @@
+<Bindings>
+
+    <Binding name="GAMEPAD_SLOT_01" header="GAMEPAD">
+        BenillaController_Slot(1)
+    </Binding>
+
+    <Binding name="GAMEPAD_SLOT_02">
+        BenillaController_Slot(2)
+    </Binding>
+
+    <Binding name="GAMEPAD_SLOT_03">
+        BenillaController_Slot(3)
+    </Binding>
+
+    <Binding name="GAMEPAD_SLOT_04">
+        BenillaController_Slot(4)
+    </Binding>
+
+    <Binding name="GAMEPAD_SLOT_05">
+        BenillaController_Slot(5)
+    </Binding>
+
+    <Binding name="GAMEPAD_SLOT_06">
+        BenillaController_Slot(6)
+    </Binding>
+
+    <Binding name="GAMEPAD_SLOT_07">
+        BenillaController_Slot(7)
+    </Binding>
+
+    <Binding name="GAMEPAD_SLOT_08">
+        BenillaController_Slot(8)
+    </Binding>
+
+
+    <Binding name="GAMEPAD_SLOT_09">
+        BenillaController_Slot(9)
+    </Binding>
+
+    <Binding name="GAMEPAD_SLOT_10">
+        BenillaController_Slot(10)
+    </Binding>
+
+    <Binding name="GAMEPAD_SLOT_11">
+        BenillaController_Slot(11)
+    </Binding>
+
+    <Binding name="GAMEPAD_SLOT_12">
+        BenillaController_Slot(12)
+    </Binding>
+
+    <Binding name="GAMEPAD_SLOT_13">
+        BenillaController_Slot(13)
+    </Binding>
+
+    <Binding name="GAMEPAD_SLOT_14">
+        BenillaController_Slot(14)
+    </Binding>
+
+    <Binding name="GAMEPAD_SLOT_15">
+        BenillaController_Slot(15)
+    </Binding>
+
+    <Binding name="GAMEPAD_SLOT_16">
+        BenillaController_Slot(16)
+    </Binding>
+
+
+    <Binding name="GAMEPAD_SLOT_17">
+        BenillaController_Slot(17)
+    </Binding>
+
+    <Binding name="GAMEPAD_SLOT_18">
+        BenillaController_Slot(18)
+    </Binding>
+
+    <Binding name="GAMEPAD_SLOT_19">
+        BenillaController_Slot(19)
+    </Binding>
+
+    <Binding name="GAMEPAD_SLOT_20">
+        BenillaController_Slot(20)
+    </Binding>
+
+    <Binding name="GAMEPAD_SLOT_21">
+        BenillaController_Slot(21)
+    </Binding>
+
+    <Binding name="GAMEPAD_SLOT_22">
+        BenillaController_Slot(22)
+    </Binding>
+
+    <Binding name="GAMEPAD_SLOT_23">
+        BenillaController_Slot(23)
+    </Binding>
+
+    <Binding name="GAMEPAD_SLOT_24">
+        BenillaController_Slot(24)
+    </Binding>
+
+    <Binding name="GAMEPAD_MODIFIER_L" header="GAMEPAD">
+        BenillaController_SetModifier(1)
+    </Binding>
+
+    <Binding name="GAMEPAD_MODIFIER_R">
+        BenillaController_SetModifier(2)
+    </Binding>
+
+    <Binding name="GAMEPAD_MODIFIER_CLEAR">
+        BenillaController_SetModifier(0)
+    </Binding>
+
+</Bindings>

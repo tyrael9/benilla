@@ -32,6 +32,15 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         "IsLinuxClient",
         lua.create_function(|_, _: MultiValue| Ok(Value::Nil))?,
     )?;
+    g.set(
+        "IsGamepadConnected",
+        lua.create_function(|lua, ()| {
+            let model = lua
+                .app_data_ref::<Model>()
+                .expect("model app_data");
+            Ok(model.gamepad.connected)
+        })?,
+    )?;
 
     // `GetDebugStats()` (`0x488af0`, `xor eax,eax; ret`): zero values, which `StatsFrame.lua:20`
     // hands straight to `SetText`.

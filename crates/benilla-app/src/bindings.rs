@@ -33,7 +33,7 @@ use benilla_ui::script::UiScript;
 
 use crate::char_select::InWorldGated;
 use crate::ui_script::{PlayerUiHover, PointerOverUiPanel, UiKeyboardCapture};
-use crate::gamepad::GamepadState;
+use crate::gamepad::{GamepadButton, GamepadState};
 
 pub(crate) mod chord;
 mod layout;
@@ -97,22 +97,24 @@ pub(crate) struct BindingsState {
     down: Vec<KeyCode>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum GamepadButton {
-    A,
-    B,
-    X,
-    Y,
-}
-
 /// The physical input a latch waits on: a keyboard key by its code, not its name, so its release
 /// ends the latch whatever the layout names it by then.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum GamepadModifier {
+    None,
+    L,
+    R,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Held {
     Key(KeyCode),
     Mouse(MouseButton),
     Wheel,
-    Gamepad(GamepadButton),
+    Gamepad {
+        button: GamepadButton,
+        modifier: GamepadModifier,
+    },
 }
 
 impl BindingsState {
@@ -519,67 +521,131 @@ fn latch_and_dispatch(
         }
     }
 
-    // ── Gamepad face buttons ──
-    // A/B/X/Y directly drive ActionButton 1/2/3/4.
-    // We reuse the normal Lua binding path so ActionBar behavior,
-    // modifiers, paging, cooldowns, etc. stay in the existing UI system.
+    // ── Gamepad modifier display ──
+    //
+    // L/R are hold modifiers for the controller bar.
+    // They do not perform an action themselves.
+    //
+    // 0 = base
+    // 1 = L
+    // 2 = R
+    //
+    // L wins if both are held.
+
+    let modifier_changed =
+        gamepad.l != gamepad.prev_l
+        || gamepad.r != gamepad.prev_r;
+
+    if modifier_changed {
+        let modifier_command =
+            if gamepad.l {
+                "GAMEPAD_MODIFIER_L"
+            } else if gamepad.r {
+                "GAMEPAD_MODIFIER_R"
+            } else {
+                "GAMEPAD_MODIFIER_CLEAR"
+            };
+
+        if let Some(s) = script.as_mut() {
+            if let Err(e) =
+                s.execute_binding(modifier_command, true)
+            {
+                warn!(
+                    "bindings({modifier_command}): {e}"
+                );
+            }
+        }
+    }
+
+    // ── Gamepad action slots ──
+    //
+    // Base:
+    //   A/B/X/Y       -> 01..04
+    //   DPad U/D/L/R  -> 05..08
+    //
+    // L + same       -> 09..16
+    // R + same       -> 17..24
+    //
+    // The modifier is captured at press time in Held::Gamepad, so releasing
+    // L/R before the action button still releases the correct slot.
+
     let gamepad_buttons = [
-        (GamepadButton::A, gamepad.a, "ACTIONBUTTON1"),
-        (GamepadButton::B, gamepad.b, "ACTIONBUTTON2"),
-        (GamepadButton::X, gamepad.x, "ACTIONBUTTON3"),
-        (GamepadButton::Y, gamepad.y, "ACTIONBUTTON4"),
+        GamepadButton::A,
+        GamepadButton::B,
+        GamepadButton::X,
+        GamepadButton::Y,
+        GamepadButton::DPadUp,
+        GamepadButton::DPadDown,
+        GamepadButton::DPadLeft,
+        GamepadButton::DPadRight,
     ];
 
-    for (button, pressed, command) in gamepad_buttons {
-        let was_pressed = match button {
-            GamepadButton::A => gamepad.prev_a,
-            GamepadButton::B => gamepad.prev_b,
-            GamepadButton::X => gamepad.prev_x,
-            GamepadButton::Y => gamepad.prev_y,
-        };
+    let modifier = gamepad_modifier(&gamepad);
 
+    for button in gamepad_buttons {
+        let pressed = gamepad.button_down(button);
+        let was_pressed = gamepad.button_was_down(button);
+
+        // ZL + A/B remain virtual-mouse controls.
+        // They must not enter the action-slot system.
         let mouse_mode_button =
             gamepad.zl > 0.5
                 && matches!(button, GamepadButton::A | GamepadButton::B);
 
         if mouse_mode_button {
             // A/B are owned by virtual mouse mode while ZL is held.
-            // If they were previously being used as ActionButtons,
-            // release them so the ActionBar binding cannot remain latched.
-            if state
-                .latched
-                .iter()
-                .any(|(k, _)| *k == Held::Gamepad(button))
-            {
-                release(
-                    &mut state,
-                    &mut script,
-                    Held::Gamepad(button),
-                );
+            // Release any action-slot latch that might have existed.
+            let latched = state.latched.iter().find_map(|(key, _)| {
+                match key {
+                    Held::Gamepad {
+                        button: b,
+                        ..
+                    } if *b == button => Some(*key),
+                    _ => None,
+                }
+            });
+
+            if let Some(key) = latched {
+                release(&mut state, &mut script, key);
             }
 
             continue;
         }
 
         if pressed && !was_pressed {
-            if !state
-                .latched
-                .iter()
-                .any(|(k, _)| *k == Held::Gamepad(button))
-            {
+            let Some(command) = gamepad_slot(button, modifier) else {
+                continue;
+            };
+
+            let held = Held::Gamepad {
+                button,
+                modifier,
+            };
+
+            if !state.latched.iter().any(|(k, _)| *k == held) {
                 press(
                     &mut state,
                     &mut script,
                     command,
-                    Held::Gamepad(button),
+                    held,
                 );
             }
         } else if !pressed && was_pressed {
-            release(
-                &mut state,
-                &mut script,
-                Held::Gamepad(button),
-            );
+            // We cannot reconstruct the press-time modifier from the current
+            // controller state, so find the latched Gamepad entry by button.
+            let latched = state.latched.iter().find_map(|(key, _)| {
+                match key {
+                    Held::Gamepad {
+                        button: b,
+                        ..
+                    } if *b == button => Some(*key),
+                    _ => None,
+                }
+            });
+
+            if let Some(key) = latched {
+                release(&mut state, &mut script, key);
+            }
         }
     }
 
@@ -606,6 +672,64 @@ fn latch_and_dispatch(
     }
 }
 
+fn gamepad_modifier(gamepad: &GamepadState) -> GamepadModifier {
+    if gamepad.l {
+        GamepadModifier::L
+    } else if gamepad.r {
+        GamepadModifier::R
+    } else {
+        GamepadModifier::None
+    }
+}
+
+fn gamepad_slot(button: GamepadButton, modifier: GamepadModifier) -> Option<&'static str> {
+    let base = match button {
+        GamepadButton::A => 1,
+        GamepadButton::B => 2,
+        GamepadButton::X => 3,
+        GamepadButton::Y => 4,
+        GamepadButton::DPadUp => 5,
+        GamepadButton::DPadDown => 6,
+        GamepadButton::DPadLeft => 7,
+        GamepadButton::DPadRight => 8,
+        _ => return None,
+    };
+
+    let slot = match modifier {
+        GamepadModifier::None => base,
+        GamepadModifier::L => base + 8,
+        GamepadModifier::R => base + 16,
+    };
+
+    Some(match slot {
+        1 => "GAMEPAD_SLOT_01",
+        2 => "GAMEPAD_SLOT_02",
+        3 => "GAMEPAD_SLOT_03",
+        4 => "GAMEPAD_SLOT_04",
+        5 => "GAMEPAD_SLOT_05",
+        6 => "GAMEPAD_SLOT_06",
+        7 => "GAMEPAD_SLOT_07",
+        8 => "GAMEPAD_SLOT_08",
+        9 => "GAMEPAD_SLOT_09",
+        10 => "GAMEPAD_SLOT_10",
+        11 => "GAMEPAD_SLOT_11",
+        12 => "GAMEPAD_SLOT_12",
+        13 => "GAMEPAD_SLOT_13",
+        14 => "GAMEPAD_SLOT_14",
+        15 => "GAMEPAD_SLOT_15",
+        16 => "GAMEPAD_SLOT_16",
+        17 => "GAMEPAD_SLOT_17",
+        18 => "GAMEPAD_SLOT_18",
+        19 => "GAMEPAD_SLOT_19",
+        20 => "GAMEPAD_SLOT_20",
+        21 => "GAMEPAD_SLOT_21",
+        22 => "GAMEPAD_SLOT_22",
+        23 => "GAMEPAD_SLOT_23",
+        24 => "GAMEPAD_SLOT_24",
+        _ => unreachable!(),
+    })
+}
+
 /// Is this input physically down, per bevy's button planes? The stuck-latch sweep and the
 /// pressed-key reconcile must agree, so both ask here. `ENTER` is down while either physical
 /// key is, since [`chord::normalize_key`] folds `NUMPADENTER` into it.
@@ -623,12 +747,7 @@ fn physically_down(
         Held::Mouse(b) => buttons.pressed(b),
         // A notch is a press and a release in one frame; it is never "held".
         Held::Wheel => false,
-        Held::Gamepad(b) => match b {
-            GamepadButton::A => gamepad.a,
-            GamepadButton::B => gamepad.b,
-            GamepadButton::X => gamepad.x,
-            GamepadButton::Y => gamepad.y,
-        },
+        Held::Gamepad { button, .. } => gamepad.button_down(button),
     }
 }
 

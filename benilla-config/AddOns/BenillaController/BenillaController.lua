@@ -379,6 +379,22 @@ local function CreateControllerButton(
                 return
             end
 
+            -- A payload already exists on the WoW cursor.
+            -- Treat this click as a native action-bar drop.
+            if CursorHasSpell()
+                or CursorHasItem()
+                or CursorHasAction() then
+
+                UseAction(action, 1, 0)
+
+                return
+            end
+
+
+            -- ----------------------------------------------------
+            -- Normal action-button behavior
+            -- ----------------------------------------------------
+
             if arg1 == "RightButton" then
 
                 UseAction(

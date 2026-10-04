@@ -478,6 +478,19 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             Ok(())
         })?,
     )?;
+    g.set(
+        "CursorHasAction",
+        lua.create_function(|lua, ()| {
+            let model = lua
+                .app_data_ref::<Model>()
+                .expect("model app_data");
+
+            Ok(matches!(
+                model.cursor,
+                Some(CursorPayload::Action(_))
+            ))
+        })?,
+    )?;
 
     g.set(
         "SplitContainerItem",

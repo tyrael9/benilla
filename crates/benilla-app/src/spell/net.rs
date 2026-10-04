@@ -893,18 +893,26 @@ fn spell_go(
     }
     // Our own launch completes the bar and opens the in-flight guard, both keyed by spell id.
     if self_guid.0 == Some(caster) {
-        // Only the cast the bar shows completes it: a proc landing mid-cast (Chilled, 6136) is our
-        // own cast too, and must not finish the running bar.
+        // Our own SPELL_GO is the successful completion of the spell.
+        // Instant spells have no `Casting` component, but Vanilla Lua still
+        // receives SPELLCAST_STOP for them.  Keep the cast-bar check only for
+        // tracing whether there was an actual visible cast bar.
         let completes_our_cast = index
             .0
             .get(&caster)
             .is_some_and(|&e| casting.get(e).is_ok_and(|c| c.spell_id == spell_id));
+
         if *crate::net::CAST_TRACE {
-            info!("cast-trace: RECV SPELL_GO — spell {spell_id} (self); completes_bar={completes_our_cast}");
+            info!(
+                "cast-trace: RECV SPELL_GO — spell {spell_id} (self); \
+                completes_bar={completes_our_cast}; SPELLCAST_STOP=yes"
+            );
         }
-        if completes_our_cast {
-            cast_bar.0.push(CastBarEdge::Stop);
-        }
+
+        // SPELLCAST_STOP is also required for instant spells (e.g. Shadow Word:
+        // Pain), which never create a `Casting` component.
+        cast_bar.0.push(CastBarEdge::Stop);
+
         pending.clear_if(spell_id);
         // The queued strike fired on this swing: the queue opens here, like the in-flight finish.
         queued_melee.clear_if(spell_id);

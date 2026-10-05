@@ -1517,7 +1517,7 @@ fn measure_fontstrings(
 
 /// The held-cursor icon for captures: 32×32 hanging down-right from the mouse, the reference's
 /// look with the hardware cursor's `(0, 0)` hotspot, above the whole UI.
-fn cursor_icon_quad(pos: Vec2, texture: Handle<Image>) -> UiQuad {
+pub(crate) fn cursor_icon_quad(pos: Vec2, texture: Handle<Image>) -> UiQuad {
     const SIZE: f32 = 32.0;
     UiQuad {
         rect: Rect::new(pos.x, pos.y, pos.x + SIZE, pos.y + SIZE),

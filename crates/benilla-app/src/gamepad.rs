@@ -220,7 +220,7 @@ pub(crate) struct SdlGamepad {
 // Call this BEFORE app.run().
 // ============================================================
 
-pub(crate) fn init_sdl() -> Option<SdlGamepad> {
+pub(crate) fn init_sdl(gamepad_index: usize) -> Option<SdlGamepad> {
     println!("SDL: init");
 
     let sdl = match sdl3::init() {
@@ -269,7 +269,7 @@ pub(crate) fn init_sdl() -> Option<SdlGamepad> {
         }
     };
 
-    let Some(id) = ids.first().copied() else {
+    let Some(id) = ids.get(gamepad_index).copied() else {
         println!("SDL: NO GAMEPAD");
         return None;
     };

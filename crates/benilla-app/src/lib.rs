@@ -253,7 +253,19 @@ fn launch(build: BuildId, extend: Option<Extension<'_>>) -> AppExit {
     // Initialize SDL before Bevy/winit starts its macOS event loop.
     // SDL HIDAPI enumeration must not happen from a Bevy Startup system.
     println!("========== BEFORE SDL INIT ==========");
-    let sdl_gamepad = crate::gamepad::init_sdl();
+
+    let gamepad_index = std::env::args()
+        .skip(1)
+        .find_map(|arg| {
+            arg.strip_prefix("--gamepad=")
+                .and_then(|s| s.parse::<usize>().ok())
+        })
+        .unwrap_or(0);
+
+    println!("Using gamepad index: {}", gamepad_index);
+
+    let sdl_gamepad = crate::gamepad::init_sdl(gamepad_index);
+
     println!("========== AFTER SDL INIT ==========");
 
     let mut app = App::new();

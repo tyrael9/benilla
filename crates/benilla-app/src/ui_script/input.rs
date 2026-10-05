@@ -98,6 +98,7 @@ pub(super) fn feed_ui_input(
     ui_scale: Res<super::UiScaleCvar>,
     time: Res<Time>,
     mut gamepad: ResMut<crate::gamepad::GamepadState>,
+    mut virtual_cursor: ResMut<crate::cursor::VirtualCursor>,
 ) {
     const GAMEPAD_MOUSE_SPEED: f32 = 700.0;
 
@@ -148,22 +149,18 @@ pub(super) fn feed_ui_input(
         let s = super::seam_scale(window.height(), ui_scale.0);
 
         if !gamepad.virtual_mouse_initialized {
-            if let Some(cursor) = window.cursor_position() {
-                // Real cursor coordinates are y-down.
-                gamepad.virtual_mouse_x = cursor.x / s;
-                gamepad.virtual_mouse_y = (window.height() - cursor.y) / s;
-            } else {
-                gamepad.virtual_mouse_x = window.width() / (2.0 * s);
-                gamepad.virtual_mouse_y = window.height() / (2.0 * s);
-            }
+            // Each Benilla instance owns its own virtual cursor.
+            // Do NOT read or move the OS cursor here.
+            gamepad.virtual_mouse_x = window.width() / (2.0 * s);
+            gamepad.virtual_mouse_y = window.height() / (2.0 * s);
 
             gamepad.virtual_mouse_initialized = true;
         }
 
         // Right stick → virtual mouse.
         //
-        // look_stick is still the normal gamepad stick value. Camera itself is
-        // suppressed in look_axes() while LT is held.
+        // look_stick is still the normal gamepad stick value.
+        // Camera itself is suppressed in look_axes() while LT is held.
         let dt = time.delta_secs();
 
         let stick = if gamepad.look_stick.length() < 0.15 {
@@ -189,20 +186,14 @@ pub(super) fn feed_ui_input(
 
         let x = gamepad.virtual_mouse_x;
         let y = gamepad.virtual_mouse_y;
+        virtual_cursor.position = Some(Vec2::new(x, y));
+        virtual_cursor.active = true;
 
-        // Move the actual OS cursor.
+        // Feed the per-instance virtual cursor directly into the WoW UI.
         //
-        // UiScript: y-up
-        // Window cursor: y-down
-        let cursor_x = x * s;
-        let cursor_y = window.height() - y * s;
-
-        window.set_cursor_position(Some(Vec2::new(
-            cursor_x,
-            cursor_y,
-        )));
-
-        // Feed the same position into the WoW UI.
+        // IMPORTANT:
+        // Do NOT warp the OS cursor. Each Benilla instance owns
+        // its own virtual cursor independently.
         hover.0 = script
             .mouse_move(x, y)
             .filter(|id| !script.is_world_frame(*id));
@@ -232,8 +223,6 @@ pub(super) fn feed_ui_input(
         // LT released.
         //
         // Always release any virtual mouse button that might still be held.
-        // This prevents a stuck drag if LT is released before A/B.
-
         if gamepad.virtual_mouse_left_down {
             script.mouse_button(
                 gamepad.virtual_mouse_x,
@@ -254,7 +243,12 @@ pub(super) fn feed_ui_input(
             gamepad.virtual_mouse_right_down = false;
         }
 
-        gamepad.virtual_mouse_initialized = false;
+        virtual_cursor.position = None;
+        virtual_cursor.active = false;
+
+        // Keep virtual_mouse_x/y and initialized state.
+        //
+        // The physical mouse path below remains completely unchanged.
 
         // Normal physical mouse path.
         if let Some(cursor) = window

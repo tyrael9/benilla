@@ -10,6 +10,13 @@
 use benilla_assets::AssetSet;
 use bevy::prelude::*;
 
+#[derive(Resource, Default, Debug)]
+pub(crate) struct VirtualCursor {
+    pub(crate) position: Option<Vec2>,
+    pub(crate) active: bool,
+    pub(crate) texture: Option<Handle<Image>>,
+}
+
 /// The held cursor payload's extensionless icon path. `covered` drops it: the reference's world
 /// transition (`0x6e4940`) calls `0x523d20(1)` and `0x523c20(1)` before the loading screen goes up,
 /// the plain arrow with no overlay.
@@ -131,6 +138,66 @@ fn cursor_path(stem: &str) -> String {
 #[derive(Resource, Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub(crate) struct DisplayedCursor(pub(crate) crate::target::WorldCursor);
 
+fn prepare_virtual_cursor(
+    mut virtual_cursor: ResMut<VirtualCursor>,
+    world_assets: Option<ResMut<benilla_assets::WorldAssets>>,
+    mut images: ResMut<Assets<Image>>,
+) {
+    // Already loaded.
+    if virtual_cursor.texture.is_some() {
+        return;
+    }
+
+    let Some(mut world_assets) = world_assets else {
+        return;
+    };
+
+    let texture = world_assets.sprite_texture(
+        "Interface\\Cursor\\Point.blp",
+        &mut images,
+    );
+
+    if texture.is_some() {
+        info!("Virtual cursor Point.blp loaded");
+    }
+
+    virtual_cursor.texture = texture;
+}
+
+fn update_virtual_cursor_overlay(
+    virtual_cursor: Res<VirtualCursor>,
+    mut quads: ResMut<crate::ui_pass::UiQuads>,
+    window: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    ui_scale: Res<crate::ui_script::UiScaleCvar>,
+) {
+    let Ok(window) = window.single() else {
+        return;
+    };
+
+    if !virtual_cursor.active {
+        return;
+    }
+
+    let (Some(pos), Some(texture)) = (
+        virtual_cursor.position,
+        virtual_cursor.texture.as_ref(),
+    ) else {
+        return;
+    };
+
+    let s = crate::ui_script::seam_scale(window.height(), ui_scale.0);
+
+    let cursor_pos = Vec2::new(
+        pos.x * s,
+        window.height() - pos.y * s,
+    );
+
+    quads.overlays.push(crate::ui_script::extract::cursor_icon_quad(
+        cursor_pos,
+        texture.clone(),
+    ));
+}
+
 /// Resolve this frame's displayed cursor: one sticky mode with two writers, the world (the
 /// WorldFrame's hover handler `0x481790`, only while it holds mouse focus) and FrameXML
 /// (`SetCursor`, `ResetCursor`, `ShowContainerSellCursor`, `ShowInspectCursor`). Between writes
@@ -235,7 +302,18 @@ pub(crate) struct CursorPlugin;
 
 impl Plugin for CursorPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<DisplayedCursor>();
+        app.init_resource::<DisplayedCursor>()
+            .init_resource::<VirtualCursor>()
+            .add_systems(
+                Update,
+                prepare_virtual_cursor,
+            ).
+            add_systems(
+                Update,
+                update_virtual_cursor_overlay
+                    .in_set(crate::ui_pass::UiQuadAppend)
+                    .after(crate::ui_script::UiInput),
+            );
         #[cfg(target_os = "macos")]
         app.add_systems(Startup, macos::setup.after(AssetSet::Open))
             .add_systems(

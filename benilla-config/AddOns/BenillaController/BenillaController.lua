@@ -30,7 +30,7 @@ local SLOT_SIZE = 36
 local SLOT_SPACING = 6
 
 local BAR_X = 20
-local BAR_Y = 180
+local BAR_Y = 100
 
 local UPDATE_INTERVAL = 0.10
 

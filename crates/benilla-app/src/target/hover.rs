@@ -24,26 +24,46 @@ use benilla_world::view::WorldCamera;
 
 use super::{Hovered, HoveredObject, PickOcclusion};
 
+fn effective_cursor_position(
+    window: &Window,
+    virtual_cursor: &crate::cursor::VirtualCursor,
+    ui_scale: &crate::ui_script::UiScaleCvar,
+) -> Option<Vec2> {
+    if virtual_cursor.active {
+        let pos = virtual_cursor.position?;
+
+        let s = crate::ui_script::seam_scale(window.height(), ui_scale.0);
+
+        return Some(Vec2::new(
+            pos.x * s,
+            window.height() - pos.y * s,
+        ));
+    }
+
+    window.cursor_position()
+}
+
 /// Trace this frame's world hit, the reference's `CWorld::Intersect` leg of the scene trace
 /// (`0x480df0`), through the [`PickOccluder`] set: terrain, the WMO walk-bake faces (about the
 /// `0x84` reject mask) and static doodad hulls. Net entities are the object trace, not occluders,
 /// so a chest never occludes itself. The picks run unbounded and compare against it after.
 pub(super) fn update_pick_occlusion(
     camera: Query<(&Camera, &GlobalTransform), With<WorldCamera>>,
-    window: Query<&Window, With<PrimaryWindow>>,
+    cursor: CursorPickInput,
     spatial: avian3d::prelude::SpatialQuery,
     occluders: Query<(), With<PickOccluder>>,
     mut occlusion: ResMut<PickOcclusion>,
 ) {
     occlusion.distance = f32::INFINITY;
     occlusion.point = None;
-    let (Ok((camera, cam_tf)), Ok(window)) = (camera.single(), window.single()) else {
+    let Ok((camera, cam_tf)) = camera.single() else {
         return;
     };
-    let Some(cursor) = window.cursor_position() else {
+
+    let Some(cursor_position) = cursor.position() else {
         return;
     };
-    let Ok(ray) = camera.viewport_to_world(cam_tf, cursor) else {
+    let Ok(ray) = camera.viewport_to_world(cam_tf, cursor_position) else {
         return;
     };
     if let Some(hit) = spatial.cast_ray_predicate(
@@ -81,6 +101,28 @@ pub(super) struct PickPose<'w, 's> {
     /// The world-space matrices the vertex stage skins with, read from the CPU rows.
     palettes: Res<'w, benilla_world::rig_palette::RigPalettes>,
     rigs: Query<'w, 's, &'static benilla_world::rig_palette::RigSkin>,
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+pub(super) struct CursorPickInput<'w, 's> {
+    window: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
+    virtual_cursor: Res<'w, crate::cursor::VirtualCursor>,
+    ui_scale: Res<'w, crate::ui_script::UiScaleCvar>,
+}
+
+impl CursorPickInput<'_, '_> {
+    fn window(&self) -> Option<&Window> {
+        self.window.single().ok()
+    }
+
+    fn position(&self) -> Option<Vec2> {
+        let window = self.window()?;
+        effective_cursor_position(
+            window,
+            &self.virtual_cursor,
+            &self.ui_scale,
+        )
+    }
 }
 
 /// The local identity and what of it and of the corpses the pick takes, one [`SystemParam`] under
@@ -178,7 +220,7 @@ fn posed_parts<'a>(
 #[allow(clippy::type_complexity)]
 pub(super) fn update_hover(
     camera: Query<(&Camera, &GlobalTransform), With<WorldCamera>>,
-    window: Query<&Window, With<PrimaryWindow>>,
+    cursor: CursorPickInput,
     rig: Res<CameraControl>,
     pointer_over_ui: Res<PointerOverUi>,
     occlusion: Res<PickOcclusion>,
@@ -251,13 +293,14 @@ pub(super) fn update_hover(
         *last_pick = None;
         return;
     }
-    let (Ok((camera, cam_tf)), Ok(window)) = (camera.single(), window.single()) else {
+    let Ok((camera, cam_tf)) = camera.single() else {
         return;
     };
-    let Some(cursor) = window.cursor_position() else {
+
+    let Some(cursor_position) = cursor.position() else {
         return;
     };
-    let Ok(ray) = camera.viewport_to_world(cam_tf, cursor) else {
+    let Ok(ray) = camera.viewport_to_world(cam_tf, cursor_position) else {
         return;
     };
     let (origin, dir) = (ray.origin, *ray.direction);
@@ -539,7 +582,7 @@ impl GoGateInputs<'_> {
 
 pub(super) fn update_hovered_object(
     camera: Query<(&Camera, &GlobalTransform), With<WorldCamera>>,
-    window: Query<&Window, With<PrimaryWindow>>,
+    cursor: CursorPickInput,
     rig: Res<CameraControl>,
     pointer_over_ui: Res<PointerOverUi>,
     occlusion: Res<PickOcclusion>,
@@ -587,7 +630,7 @@ pub(super) fn update_hovered_object(
     if yielded {
         *last_pick = None;
     }
-    let (Ok((camera, cam_tf)), Ok(window)) = (camera.single(), window.single()) else {
+    let Ok((camera, cam_tf)) = camera.single() else {
         return;
     };
     // The aim: the OS pointer, else the probe's for a cursorless window. Published before the
@@ -597,23 +640,30 @@ pub(super) fn update_hovered_object(
     let probe_aim = cache
         .lock
         .point(camera, cam_tf, |e| parts.get(e).ok().map(|(_, gt, ..)| *gt))
-        .or_else(|| super::hover_probe::point(window, *cache.frame));
+        .or_else(|| {
+            cursor
+                .window()
+                .and_then(|window| super::hover_probe::point(window, *cache.frame))
+        });
     super::hover_probe::publish(probe_aim);
     if yielded {
         return;
     }
-    let Some(cursor) = window.cursor_position().or(probe_aim) else {
+    let Some(cursor_position) = cursor.position().or(probe_aim) else {
         return;
     };
     if pickable.is_empty() {
         *last_pick = None;
         return;
     }
-    let Ok(ray) = camera.viewport_to_world(cam_tf, cursor) else {
+    let Ok(ray) = camera.viewport_to_world(cam_tf, cursor_position) else {
         return;
     };
     let self_store = self_q.single().ok();
 
+    let Some(window) = cursor.window() else {
+        return;
+    };
     // The probe's census, once a second: where the pickable GameObjects are on screen, so a
     // headless miss tells a pick fault from a camera looking elsewhere.
     if probing && (*cache.frame).is_multiple_of(60) {
@@ -710,7 +760,7 @@ pub(super) fn update_hovered_object(
     let Some((distance, net_entity)) = picked else {
         if probing {
             cache.report.say(format!(
-                "aim {cursor:?} — no GameObject hit (pickable {})",
+                "aim {cursor_position:?} — no GameObject hit (pickable {})",
                 pickable.len()
             ));
         }

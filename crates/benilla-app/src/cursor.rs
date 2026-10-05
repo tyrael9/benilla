@@ -17,10 +17,15 @@ pub(crate) struct VirtualCursor {
     pub(crate) texture: Option<Handle<Image>>,
 }
 
+#[derive(Resource, Default)]
+pub(crate) struct VirtualCursorTextures {
+    pub(crate) textures: std::collections::HashMap<String, Handle<Image>>,
+}
+
 /// The held cursor payload's extensionless icon path. `covered` drops it: the reference's world
 /// transition (`0x6e4940`) calls `0x523d20(1)` and `0x523c20(1)` before the loading screen goes up,
 /// the plain arrow with no overlay.
-fn payload_icon(script: &benilla_ui::script::UiScript, covered: bool) -> Option<String> {
+pub(crate) fn payload_icon(script: &benilla_ui::script::UiScript, covered: bool) -> Option<String> {
     use benilla_ui::script::CursorPayload;
     if covered {
         return None;
@@ -78,7 +83,7 @@ fn box_downsample_32(w: u32, h: u32, rgba: &[u8]) -> Vec<u8> {
 
 /// Decode a payload icon to an opaque 32×32 RGBA8 cursor, as the client's drag bitmap does
 /// (`0x523840`: a 64×64 icon, 2×2 box filter, alpha 0xFF).
-fn decode_payload_cursor_rgba(
+pub(crate) fn decode_payload_cursor_rgba(
     assets: &mut benilla_assets::WorldAssets,
     path: &str,
 ) -> Option<Vec<u8>> {
@@ -164,11 +169,50 @@ fn prepare_virtual_cursor(
     virtual_cursor.texture = texture;
 }
 
+fn cursor_texture(
+    stem: &str,
+    textures: &mut VirtualCursorTextures,
+    world_assets: &mut benilla_assets::WorldAssets,
+    images: &mut Assets<Image>,
+) -> Option<Handle<Image>> {
+    if let Some(texture) = textures.textures.get(stem) {
+        return Some(texture.clone());
+    }
+
+    let path = format!("Interface\\Cursor\\{stem}.blp");
+
+    if let Some(texture) = world_assets.sprite_texture(&path, images) {
+        textures.textures.insert(stem.to_string(), texture.clone());
+        return Some(texture);
+    }
+
+    if let Some(base) = stem.strip_prefix("Unable") {
+        if let Some(texture) = textures.textures.get(base) {
+            return Some(texture.clone());
+        }
+
+        let path = format!("Interface\\Cursor\\{base}.blp");
+
+        if let Some(texture) = world_assets.sprite_texture(&path, images) {
+            textures.textures.insert(base.to_string(), texture.clone());
+            return Some(texture);
+        }
+    }
+
+    textures.textures.get("Point").cloned()
+}
+
 fn update_virtual_cursor_overlay(
     virtual_cursor: Res<VirtualCursor>,
+    displayed_cursor: Res<DisplayedCursor>,
     mut quads: ResMut<crate::ui_pass::UiQuads>,
     window: Query<&Window, With<bevy::window::PrimaryWindow>>,
     ui_scale: Res<crate::ui_script::UiScaleCvar>,
+    mut textures: ResMut<VirtualCursorTextures>,
+    world_assets: Option<ResMut<benilla_assets::WorldAssets>>,
+    mut images: ResMut<Assets<Image>>,
+    script: Option<NonSend<benilla_ui::script::UiScript>>,
+    screen: Res<crate::loading_screen::LoadingScreen>,
 ) {
     let Ok(window) = window.single() else {
         return;
@@ -178,10 +222,39 @@ fn update_virtual_cursor_overlay(
         return;
     }
 
-    let (Some(pos), Some(texture)) = (
-        virtual_cursor.position,
-        virtual_cursor.texture.as_ref(),
-    ) else {
+    let Some(pos) = virtual_cursor.position else {
+        return;
+    };
+
+    let texture = world_assets.and_then(|mut assets| {
+        if let Some(script) = script.as_ref() {
+            if let Some(icon) =
+                crate::cursor::payload_icon(script, screen.covering())
+            {
+                let key = format!("payload:{icon}");
+
+                if let Some(texture) = textures.textures.get(&key).cloned() {
+                    return Some(texture);
+                }
+
+                let path = icon.clone();
+
+                if let Some(texture) = assets.sprite_texture(&path, &mut images) {
+                    textures.textures.insert(key, texture.clone());
+                    return Some(texture);
+                }
+            }
+        }
+
+        cursor_texture(
+            &displayed_cursor.0.stem(),
+            &mut textures,
+            &mut assets,
+            &mut images,
+        )
+    });
+
+    let Some(texture) = texture else {
         return;
     };
 
@@ -192,10 +265,12 @@ fn update_virtual_cursor_overlay(
         window.height() - pos.y * s,
     );
 
-    quads.overlays.push(crate::ui_script::extract::cursor_icon_quad(
-        cursor_pos,
-        texture.clone(),
-    ));
+    quads.overlays.push(
+        crate::ui_script::extract::cursor_icon_quad(
+            cursor_pos,
+            texture,
+        )
+    );
 }
 
 /// Resolve this frame's displayed cursor: one sticky mode with two writers, the world (the
@@ -304,15 +379,17 @@ impl Plugin for CursorPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<DisplayedCursor>()
             .init_resource::<VirtualCursor>()
+            .init_resource::<VirtualCursorTextures>()
             .add_systems(
                 Update,
                 prepare_virtual_cursor,
-            ).
-            add_systems(
+            )
+            .add_systems(
                 Update,
                 update_virtual_cursor_overlay
                     .in_set(crate::ui_pass::UiQuadAppend)
-                    .after(crate::ui_script::UiInput),
+                    .after(crate::ui_script::UiInput)
+                    .after(drive_displayed_cursor),
             );
         #[cfg(target_os = "macos")]
         app.add_systems(Startup, macos::setup.after(AssetSet::Open))

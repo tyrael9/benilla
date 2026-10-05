@@ -121,7 +121,7 @@ pub(super) fn feed_ui_input(
         payload_held.0 = false;
         return;
     };
-    let Ok((mut window, raw_handle)) = window.single_mut() else {
+    let Ok((window, raw_handle)) = window.single_mut() else {
         capture.typing = false;
         capture.arrows_fall_through = false;
         capture.consumed.clear();

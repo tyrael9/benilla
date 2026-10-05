@@ -535,7 +535,7 @@ fn gamepad_r3_target_nearest_interactable(
 
 fn sync_gamepad_to_lua(
     gamepad: Res<GamepadState>,
-    mut script: Option<NonSendMut<UiScript>>,
+    script: Option<NonSendMut<UiScript>>,
 ) {
     let Some(mut script) = script else {
         return;

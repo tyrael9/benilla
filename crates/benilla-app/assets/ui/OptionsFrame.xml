@@ -643,6 +643,17 @@
             local dd = UIDropDownMenu_GetCurrentDropDown()
             local row = dd:GetParent()
             BenillaOptionsRow_Set(row, this.value)
+
+            -- gxWindow is latched, so apply the new window mode immediately.
+            -- gxMaximize=1 means borderless fullscreen even when gxWindow=1,
+            -- so clear it when switching to ordinary Windowed mode.
+            if row.cvar == "gxWindow" then
+                if this.value == "1" then
+                    SetCVar("gxMaximize", "0")
+                end
+                RestartGx()
+            end
+
             BenillaOptionsDropdown_ShowValue(row)
         end
 

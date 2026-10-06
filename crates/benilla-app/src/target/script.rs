@@ -24,6 +24,7 @@ pub(crate) struct ScriptSelect<'w, 's> {
     /// The TAB cycler's inputs, for the `TargetNearest*` calls.
     scan: scan::TargetScan<'w, 's>,
     history: ResMut<'w, scan::TabHistory>,
+    interact: ResMut<'w, super::InteractTarget>,
     time: Res<'w, Time>,
 }
 
@@ -85,6 +86,7 @@ impl ScriptSelect<'_, '_> {
             &self.scan,
             &mut self.history,
             &mut self.commit.selection,
+            &mut self.interact,
             &mut self.commit.seam,
             engaged,
         );

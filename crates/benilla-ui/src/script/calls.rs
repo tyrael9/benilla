@@ -66,6 +66,7 @@ pub enum NearestMode {
     /// Mode 4, `TargetNearestRaidMember`: a party or raid member other than us.
     RaidMember,
     Interactable,
+    Smart,
 }
 
 impl UiScript {

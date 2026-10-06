@@ -329,7 +329,7 @@ impl Plugin for GamepadPlugin {
             )
             .add_systems(
                 Update,
-                gamepad_r3_target_nearest_interactable
+                gamepad_r3_target_nearest
                     .after(poll_gamepad)
                     .before(crate::script_calls::apply_script_calls),
             )
@@ -506,17 +506,21 @@ fn poll_gamepad(
 fn gamepad_rt_interact(
     gamepad: Res<GamepadState>,
     selection: Res<crate::target::Selection>,
+    interact: Res<crate::target::InteractTarget>,
     mut interacts: MessageWriter<crate::target::Interact>,
 ) {
     if gamepad.zr > 0.5 && gamepad.prev_zr <= 0.5 {
-        if let Some(target) = selection.target {
+        let target = interact.target.or(selection.target);
+
+        if let Some(target) = target {
             interacts.write(crate::target::Interact(target));
         }
     }
 }
 
-fn gamepad_r3_target_nearest_interactable(
+fn gamepad_r3_target_nearest(
     gamepad: Res<GamepadState>,
+    self_q: Query<&crate::net::ObjectStore, With<crate::net::SelfPlayer>>,
     script: Option<NonSendMut<UiScript>>,
 ) {
     if !gamepad.r3 || gamepad.prev_r3 {
@@ -527,8 +531,29 @@ fn gamepad_r3_target_nearest_interactable(
         return;
     };
 
+    let in_combat = self_q
+        .single()
+        .ok()
+        .is_some_and(|store| {
+            store.0.unit_flags() & crate::player::UNIT_FLAG_IN_COMBAT != 0
+        });
+
+    let mode = if gamepad.l {
+        // LB + R3 → friendly
+        NearestMode::Friend
+    } else if gamepad.r {
+        // RB + R3 → interactable
+        NearestMode::Interactable
+    } else if in_combat {
+        // R3 in combat → hostile
+        NearestMode::Enemy
+    } else {
+        // R3 out of combat → smart hostile/interactable
+        NearestMode::Smart
+    };
+
     script.push_script_call(ScriptCall::TargetNearest {
-        mode: NearestMode::Interactable,
+        mode,
         reverse: false,
     });
 }

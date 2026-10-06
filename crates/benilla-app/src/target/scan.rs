@@ -20,7 +20,13 @@ use crate::names::NameCache;
 use crate::net::{ClientCommand, Guid, GuidIndex, NetEntity, ObjectStore, Reputations, SelfPlayer};
 use benilla_assets::{LockRecover, WorldAssets};
 
-use super::relations::{can_assist, can_attack};
+use super::cursor_mode::{
+    go_highlightable,
+    fishing_channel_owned,
+    meeting_stone_queued,
+    GoOverrides,
+};
+use super::relations::{can_assist, can_attack, can_interact, corpse_friendly};
 use super::ring::reaction_from_player;
 use super::{Factions, Selection};
 
@@ -68,6 +74,7 @@ pub(crate) enum ScanSide {
     /// (`0x4baee0`).
     Raid,
     Interactable,
+    Smart,
 }
 
 impl ScanSide {
@@ -80,6 +87,7 @@ impl ScanSide {
             NearestMode::PartyMember => Self::Party,
             NearestMode::RaidMember => Self::Raid,
             NearestMode::Interactable => Self::Interactable,
+            NearestMode::Smart => Self::Smart,
         }
     }
 }
@@ -89,8 +97,13 @@ impl ScanSide {
 struct Candidate {
     entity: Entity,
     guid: u64,
+    kind: EntityKind,
     on_screen: bool,
     score: f32,
+    // 0 = Party
+    // 1 = Raid
+    // 2 = Other
+    friend_priority: u8,
 }
 
 /// Off-centerness (none off-screen) plus normalized distance, minus the fighting-me bonus.
@@ -107,6 +120,7 @@ fn priority_score(off_center: Option<f32>, dist: f32, combat_with_me: bool) -> f
 fn candidate_order(a: &Candidate, b: &Candidate) -> std::cmp::Ordering {
     b.on_screen
         .cmp(&a.on_screen)
+        .then(a.friend_priority.cmp(&b.friend_priority))
         .then(a.score.total_cmp(&b.score))
 }
 
@@ -222,6 +236,9 @@ pub(crate) struct TargetScan<'w, 's> {
     index: Option<Res<'w, GuidIndex>>,
     /// The party slots and raid roster modes 3 and 4 test; `Option` for the same harnesses.
     group: Option<Res<'w, crate::ui_party::GroupState>>,
+
+    go_inputs: super::lock::GoLockInputs<'w, 's>,
+    stone: Option<Res<'w, crate::ui_dialog_verbs::MeetingStone>>,
 }
 
 impl TargetScan<'_, '_> {
@@ -267,6 +284,76 @@ impl TargetScan<'_, '_> {
                     || (g.group_type == 1 && g.members.iter().any(|m| m.guid == guid))
             }),
             ScanSide::Interactable => true,
+            ScanSide::Smart => {
+                // Smart's unit candidates must be hostile.
+                // Corpse/GameObject candidates are handled by the interactable branch
+                // in build(), because they do not have Unit relationship semantics.
+                can_attack(
+                    store,
+                    self.factions.as_deref(),
+                    &self.reputations,
+                    self_store,
+                )
+            }
+        }
+    }
+
+    fn is_interactable(
+        &self,
+        net_kind: EntityKind,
+        guid: u64,
+        store: Option<&ObjectStore>,
+        self_store: Option<&ObjectStore>,
+    ) -> bool {
+        let Some(store) = store else {
+            return false;
+        };
+
+        match net_kind {
+            EntityKind::Unit | EntityKind::Player => {
+                let dead = store.0.unit_is_dead();
+                let lootable = store.0.unit_lootable();
+
+                if dead {
+                    return lootable;
+                }
+
+                can_interact(
+                    Some(store),
+                    self.factions.as_deref(),
+                    &self.reputations,
+                    self_store,
+                )
+            }
+
+            EntityKind::Corpse => {
+                !store.0.corpse_is_bones() || store.0.corpse_lootable()
+            }
+
+            EntityKind::GameObject => {
+                let reaction = super::cursor_mode::go_reaction(
+                    self.factions.as_deref(),
+                    store.0.gameobject_faction(),
+                    self_store,
+                );
+
+                let tmpl = self.go_inputs.templates.get(guid);
+
+                let overrides = GoOverrides {
+                    channel_owned: fishing_channel_owned(
+                        self_store,
+                        Some(guid),
+                    ),
+                    meeting_stone_queued: meeting_stone_queued(
+                        tmpl.and_then(|t| t.meeting_stone).map(|m| m.area),
+                        self.stone.as_deref().map_or(0, |s| s.area),
+                    ),
+                };
+
+                go_highlightable(store, reaction, overrides)
+            }
+
+            _ => false,
         }
     }
 
@@ -286,6 +373,28 @@ impl TargetScan<'_, '_> {
             .ok()
             .and_then(|(_, _, g)| g)
             .map(|g| g.0)
+    }
+
+    fn friend_priority(&self, side: ScanSide, guid: u64) -> u8 {
+        if side != ScanSide::Friend {
+            return 2;
+        }
+
+        let Some(group) = self.group.as_ref() else {
+            return 2;
+        };
+
+        // Own party/subgroup always wins.
+        if group.party_slots().any(|m| m.guid == guid) {
+            return 0;
+        }
+
+        // In a raid, other-subgroup members are the second tier.
+        if group.group_type == 1 && group.members.iter().any(|m| m.guid == guid) {
+            return 1;
+        }
+
+        2
     }
 
     fn store_at(&self, entity: Entity) -> Option<&ObjectStore> {
@@ -320,6 +429,7 @@ impl TargetScan<'_, '_> {
             if !trace {
                 return;
             }
+
             info!(
                 "tab-trace:   {guid:#x} \"{}\" {:.1} yd — {verdict}",
                 self.names.peek(guid).unwrap_or("?"),
@@ -328,36 +438,57 @@ impl TargetScan<'_, '_> {
         };
         let mut out = Vec::new();
         for (entity, net, guid_c, tf, store) in &self.units {
-            if !matches!(
-                (side, net.kind),
-                (
-                    ScanSide::Interactable,
-                    EntityKind::Unit
-                        | EntityKind::Player
-                        | EntityKind::GameObject
-                        | EntityKind::Corpse
-                )
-                | (
-                    ScanSide::Enemy | ScanSide::Friend | ScanSide::Party | ScanSide::Raid,
-                    EntityKind::Unit | EntityKind::Player
-                )
-            ) {
+            let is_unit = matches!(net.kind, EntityKind::Unit | EntityKind::Player);
+
+            let is_targetable_kind = matches!(
+                net.kind,
+                EntityKind::Unit
+                    | EntityKind::Player
+                    | EntityKind::GameObject
+                    | EntityKind::Corpse
+            );
+
+            if !is_targetable_kind {
                 continue;
             }
-            if !self.is_valid(side, guid_c.0, store, self_store) {
-                trace_unit(
+
+            let valid = match side {
+                ScanSide::Enemy
+                | ScanSide::Friend
+                | ScanSide::Party
+                | ScanSide::Raid => {
+                    // These modes only target Units/Players.
+                    is_unit && self.is_valid(side, guid_c.0, store, self_store)
+                }
+
+                ScanSide::Smart => {
+                    if is_unit {
+                        self.is_valid(ScanSide::Enemy, guid_c.0, store, self_store)
+                            || self.is_interactable(net.kind, guid_c.0, store, self_store)
+                    } else {
+                        self.is_interactable(net.kind, guid_c.0, store, self_store)
+                    }
+                }
+
+                ScanSide::Interactable => {
+                    self.is_interactable(net.kind, guid_c.0, store, self_store)
+                }
+            };
+
+            if trace {
+                info!(
+                    "tab-trace:   {:#x} \"{}\" kind={:?} — {}",
                     guid_c.0,
-                    tf,
-                    match side {
-                        ScanSide::Enemy => "REJECT dead-or-unattackable",
-                        ScanSide::Friend => "REJECT dead-or-unassistable",
-                        ScanSide::Party => "REJECT not-in-party",
-                        ScanSide::Raid => "REJECT not-in-party-or-raid",
-                        ScanSide::Interactable => "REJECT not-interactable",
-                    },
+                    self.names.peek(guid_c.0).unwrap_or("?"),
+                    net.kind,
+                    if valid { "VALID" } else { "REJECT validity" },
                 );
+            }
+
+            if !valid {
                 continue;
             }
+
             // The critter gate; an unresolved type passes, like the client's out-of-range index.
             if guid::is_creature_or_pet(guid_c.0) {
                 if let (Some(types), Some(ty)) = (
@@ -397,8 +528,10 @@ impl TargetScan<'_, '_> {
             out.push(Candidate {
                 entity,
                 guid: guid_c.0,
+                kind: net.kind,
                 on_screen: off_center.is_some(),
                 score,
+                friend_priority: self.friend_priority(side, guid_c.0),
             });
         }
         out.sort_by(candidate_order);
@@ -515,6 +648,7 @@ pub(super) fn cycle(
     scan: &TargetScan,
     history: &mut TabHistory,
     selection: &mut Selection,
+    interact: &mut super::InteractTarget,
     seam: &mut crate::creature_anim::AttackSeam,
     engaged: bool,
 ) {
@@ -550,48 +684,83 @@ pub(super) fn cycle(
     }
     // Reverse walks the history back; an empty walk falls through to the forward pick.
     let visited = history.guids();
+    let current_guid = selection.guid.or(interact.guid);
     let back = reverse
         .then(|| pick_back(&visited, &pool, selection.guid))
         .flatten();
-    let (entity, guid, wrapped) = match back {
-        Some(i) => (pool[i].entity, pool[i].guid, false),
+    let (entity, guid, kind, wrapped) = match back {
+        Some(i) => (
+            pool[i].entity,
+            pool[i].guid,
+            pool[i].kind,
+            false,
+        ),
         None => {
-            let Some((i, wrapped)) = pick_forward(&pool, &visited, selection.guid) else {
+            let Some((i, wrapped)) = pick_forward(&pool, &visited, current_guid) else {
                 return;
             };
-            (pool[i].entity, pool[i].guid, wrapped)
+
+            (
+                pool[i].entity,
+                pool[i].guid,
+                pool[i].kind,
+                wrapped,
+            )
         }
     };
     if wrapped {
         history.visited.clear();
     }
     // The outgoing selection joins the history (`TargetPriorityContinueFromManualTarget`).
-    if let Some(old) = selection.guid {
+    if let Some(old) = current_guid {
         history.push(old, now);
     }
-    let out = commit(
-        selection,
-        seam,
-        entity,
-        guid,
-        scan.store_at(entity),
-        engaged,
-        // `IsSelectable`'s `CREATEDBY` clause reads it.
-        scan.self_guid(),
-        // `Attack 0x5ecb70`'s validation, which a mode-2 pick fails (reaction >= 4 against
-        // `CanAttack`'s < 4). A duelling friendly passes `CanAttack`'s duel arm, which reads no
-        // reaction, so the reference's `Attack` would re-swing at it; here it gets none.
-        side == ScanSide::Enemy,
-    );
-    if out.changed {
+
+    let is_unit = matches!(kind, EntityKind::Unit | EntityKind::Player);
+
+    let selection_changed = if is_unit {
+        // Unit/Player → normal WoW target.
+        interact.target = None;
+        interact.guid = None;
+
+        let out = commit(
+            selection,
+            seam,
+            entity,
+            guid,
+            scan.store_at(entity),
+            engaged,
+            scan.self_guid(),
+            side == ScanSide::Enemy,
+        );
+
+        if out.changed {
+            history.push(guid, now);
+        }
+
+        out.changed
+    } else {
+        // Corpse/GameObject → interaction target only.
+        //
+        // Do NOT send them through Selection/SetSelection.
+        if selection.guid.is_some() {
+            super::click::deselect(selection, seam, engaged);
+        }
+
+        interact.target = Some(entity);
+        interact.guid = Some(guid);
+
         history.push(guid, now);
-    }
+
+        true
+    };
+
     if trace {
         info!(
             "tab-trace: pick {guid:#x} \"{}\"{} — {}",
             scan.names.peek(guid).unwrap_or("?"),
             if wrapped { " (wrapped)" } else { "" },
-            if out.changed {
+            if selection_changed {
                 "selection changed"
             } else {
                 "NO-OP (already the selection)"
@@ -610,6 +779,7 @@ pub(crate) struct AttackPick<'w, 's> {
     history: ResMut<'w, TabHistory>,
     time: Res<'w, Time>,
     engaged: Query<'w, 's, (), (With<Engaged>, With<SelfPlayer>)>,
+    interact: ResMut<'w, super::InteractTarget>,
 }
 
 impl AttackPick<'_, '_> {
@@ -649,6 +819,7 @@ impl AttackPick<'_, '_> {
                 &self.scan,
                 &mut self.history,
                 selection,
+                &mut self.interact,
                 seam,
                 engaged,
             );
@@ -1055,8 +1226,10 @@ mod tests {
         Candidate {
             entity: Entity::PLACEHOLDER,
             guid,
+            kind: EntityKind::Player,
             on_screen,
             score,
+            friend_priority: 2,
         }
     }
 

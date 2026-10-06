@@ -81,7 +81,7 @@ pub(super) fn feed_ui_input(
     script: Option<NonSendMut<UiScript>>,
     // Carries the `wl_display` the Wayland clipboard backend needs, once winit has a surface.
     mut window: Query<(&mut Window, Option<&bevy::window::RawHandleWrapper>), With<PrimaryWindow>>,
-    buttons: Res<ButtonInput<MouseButton>>,
+    mut buttons: ResMut<ButtonInput<MouseButton>>,
     // The wheel travel and its carried notch fraction, one param for clippy's argument ceiling.
     (scroll, mut notches): (Res<AccumulatedMouseScroll>, ResMut<WheelNotches>),
     mut pointer: PointerFeed,
@@ -99,6 +99,7 @@ pub(super) fn feed_ui_input(
     time: Res<Time>,
     mut gamepad: ResMut<crate::gamepad::GamepadState>,
     mut virtual_cursor: ResMut<crate::cursor::VirtualCursor>,
+    mut virtual_mouse_buttons: ResMut<crate::cursor::VirtualMouseButtons>,
 ) {
     const GAMEPAD_MOUSE_SPEED: f32 = 700.0;
 
@@ -144,6 +145,44 @@ pub(super) fn feed_ui_input(
     // The real OS cursor uses y-down window coordinates, so we convert when warping it.
 
     let gamepad_mouse = gamepad.zl > 0.5;
+
+    // ── Virtual mouse → Bevy mouse buttons ─────────────────────────────────────
+    //
+    // While LT is held, A/B are the mouse buttons for this Benilla instance.
+    // Inject them into Bevy's normal ButtonInput so the existing world-input
+    // pipeline sees exactly the same mouse events as a physical mouse.
+
+    if gamepad_mouse {
+        let want_left = gamepad.a;
+        let want_right = gamepad.b;
+
+        if want_left && !virtual_mouse_buttons.left {
+            buttons.press(MouseButton::Left);
+        } else if !want_left && virtual_mouse_buttons.left {
+            buttons.release(MouseButton::Left);
+        }
+
+        if want_right && !virtual_mouse_buttons.right {
+            buttons.press(MouseButton::Right);
+        } else if !want_right && virtual_mouse_buttons.right {
+            buttons.release(MouseButton::Right);
+        }
+
+        virtual_mouse_buttons.left = want_left;
+        virtual_mouse_buttons.right = want_right;
+    } else {
+        // LT released: release any buttons owned by the virtual mouse.
+        if virtual_mouse_buttons.left {
+            buttons.release(MouseButton::Left);
+        }
+
+        if virtual_mouse_buttons.right {
+            buttons.release(MouseButton::Right);
+        }
+
+        virtual_mouse_buttons.left = false;
+        virtual_mouse_buttons.right = false;
+    }
 
     if gamepad_mouse {
         let s = super::seam_scale(window.height(), ui_scale.0);

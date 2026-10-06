@@ -22,6 +22,12 @@ pub(crate) struct VirtualCursorTextures {
     pub(crate) textures: std::collections::HashMap<String, Handle<Image>>,
 }
 
+#[derive(Resource, Default, Debug, Clone, Copy)]
+pub(crate) struct VirtualMouseButtons {
+    pub left: bool,
+    pub right: bool,
+}
+
 /// The held cursor payload's extensionless icon path. `covered` drops it: the reference's world
 /// transition (`0x6e4940`) calls `0x523d20(1)` and `0x523c20(1)` before the loading screen goes up,
 /// the plain arrow with no overlay.

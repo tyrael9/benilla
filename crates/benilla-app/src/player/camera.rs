@@ -776,6 +776,7 @@ pub(super) fn latch_world_mouse(
     window: Single<&Window, With<PrimaryWindow>>,
     mut script: Option<NonSendMut<benilla_ui::script::UiScript>>,
     cover: Option<Res<crate::loading_screen::LoadingScreen>>,
+    virtual_cursor: Res<crate::cursor::VirtualCursor>,
 ) {
     let calls = script
         .as_mut()
@@ -785,10 +786,8 @@ pub(super) fn latch_world_mouse(
         return;
     };
     let over_ui = pointer_over_ui.0;
-
-    let world_press =
-        rig.look.is_some()
-            || (cursor_in_viewport(&window, camera) && !over_ui);
+    let cursor_in_viewport = virtual_cursor.active || cursor_in_viewport(&window, camera);
+    let world_press = rig.look.is_some() || (cursor_in_viewport && !over_ui);
 
     let wm = &mut rig.world_mouse;
 

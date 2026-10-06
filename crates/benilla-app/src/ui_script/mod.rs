@@ -280,6 +280,7 @@ impl Plugin for UiScriptPlugin {
             .init_resource::<CursorPayloadHeld>()
             .init_resource::<UiClock>()
             .init_resource::<AddOnIdentity>()
+            .init_resource::<crate::cursor::VirtualMouseButtons>()
             // After `AssetSet::Open`: the VM's first load is the chain's `GlobalStrings.lua`.
             .add_systems(Startup, setup_script.after(benilla_assets::AssetSet::Open))
             // The in-game UI loads on world entry, as the reference's does, once the loading cover

@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use sdl3::gamepad::{Axis, Button, Gamepad};
 use benilla_ui::script::{NearestMode, ScriptCall, UiScript};
+use crate::bindings::BindingDispatch;
 
 // gamepad.rs
 
@@ -333,6 +334,12 @@ impl Plugin for GamepadPlugin {
                     .after(poll_gamepad)
                     .before(crate::script_calls::apply_script_calls),
             )
+            .add_systems(
+                Update,
+                gamepad_utility_bindings
+                    .after(poll_gamepad)
+                    .before(crate::bindings::BindingSet),
+            )
             .add_systems(Update, gamepad_rt_interact)
             .add_systems(
                 Update, 
@@ -514,6 +521,80 @@ fn gamepad_rt_interact(
 
         if let Some(target) = target {
             interacts.write(crate::target::Interact(target));
+        }
+    }
+}
+
+fn gamepad_utility_bindings(
+    gamepad: Res<GamepadState>,
+    script: Option<NonSendMut<UiScript>>,
+    dispatch: Res<BindingDispatch>,
+) {
+    let Some(mut script) = script else {
+        return;
+    };
+
+    // ========================================================
+    // L3 → Auto Run
+    //
+    // One-shot. ToggleAutoRun() is already part of the normal
+    // binding/input pipeline, so do not touch Player.autorun
+    // directly.
+    // ========================================================
+
+    if gamepad.l3 && !gamepad.prev_l3 {
+        if let Err(e) = script.execute_binding("TOGGLEAUTORUN", true) {
+            warn!("gamepad: TOGGLEAUTORUN: {e}");
+        }
+    }
+
+    // ========================================================
+    // + / Start → World Map
+    //
+    // Use the existing WoW Lua path so the map button state,
+    // WorldMapFrame, zoom state, etc. remain consistent.
+    // ========================================================
+
+    if gamepad.plus && !gamepad.prev_plus {
+        if let Err(e) = script.run("ToggleWorldMap()") {
+            warn!("gamepad: ToggleWorldMap(): {e}");
+        }
+    }
+
+    let lt = gamepad.zl > 0.5;
+    let prev_lt = gamepad.prev_zl > 0.5;
+
+    if lt && !prev_lt {
+        // LT itself is only a modifier. Do not fire anything
+        // merely by pressing LT.
+    }
+
+    // ========================================================
+    // LT + Y → Jump
+    //
+    // ZL is the modifier; Y is the action.
+    // One-shot on Y press.
+    // ========================================================
+
+    if lt && gamepad.y && !gamepad.prev_y {
+        if let Err(e) = script.execute_binding("JUMP", true) {
+            warn!("gamepad: JUMP: {e}");
+        }
+    }
+
+    // ========================================================
+    // LT + X → Escape / Back
+    //
+    // Actual Escape handling is UI-level and should use the
+    // existing Escape input path.
+    // ========================================================
+
+    if lt && gamepad.x && !gamepad.prev_x {
+        // Same path as a physical Escape key:
+        // 1. Let the UI consume ESCAPE first.
+        // 2. If nobody consumes it, dispatch the ESCAPE binding.
+        if !script.key_input("ESCAPE") {
+            dispatch.dispatch_key(&mut script, "ESCAPE");
         }
     }
 }

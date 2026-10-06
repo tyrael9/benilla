@@ -254,6 +254,42 @@ pub(super) fn control(
         time.elapsed_secs(),
         focused,
     );
+    // Gamepad right-stick pitch must also update the swim mover pitch.
+    // run_look_session() has already applied the gamepad look to cam.pitch.
+    let gamepad_look = gamepad.look_axis();
+
+    if player.swimming && gamepad.zl <= 0.5 {
+        let near_surface = match player.liquid_surface {
+            Some(surface_y) => {
+                let depth = surface_y - player.pos.y;
+                let swim_depth =
+                    swim::swim_enter_depth(player.collision_height.0);
+
+                depth <= swim_depth + 0.5
+            }
+            None => false,
+        };
+
+        if near_surface {
+            // Surface swimming:
+            // A normal downward camera pitch must not make the character dive.
+            // Only a deliberate vertical stick input takes control of swim pitch.
+            if gamepad_look.y.abs() > 0.5 {
+                let aim_pitch = cam.pitch + rig.smart_pivot.bias();
+                player.mover_pitch =
+                    aim_pitch.clamp(-MOUSELOOK_PITCH_CLAMP, MOUSELOOK_PITCH_CLAMP);
+            } else {
+                player.mover_pitch = 0.0;
+            }
+        } else {
+            // Fully underwater: keep the responsive camera-pitch swimming behavior.
+            if gamepad_look.y.abs() > 0.05 {
+                let aim_pitch = cam.pitch + rig.smart_pivot.bias();
+                player.mover_pitch =
+                    aim_pitch.clamp(-MOUSELOOK_PITCH_CLAMP, MOUSELOOK_PITCH_CLAMP);
+            }
+        }
+    }
     // The mouse turns the view, but the body hand-off (`0x514474`) skips a body that is stunned,
     // dead or seated (`0x5145e0`) or not ours to drive (`control_lost`, `reseat`), while the
     // camera rotate (`0x514444`) still runs. The reference never writes the facing; writing and
@@ -578,9 +614,19 @@ pub(super) fn control(
         // `0x400500cb`), not per frame, so other writers survive a still mouse. The aim includes
         // the pivot bias, as `0x5103e0` passes `[cam+0x104] + [cam+0xf4]`.
         let aim_pitch = cam.pitch + rig.smart_pivot.bias();
-        if mouselook && aim_pitch != player.aim_pitch_seen {
+
+        // When the gamepad owns swimming pitch, don't let the normal mouse-look
+        // writer overwrite mover_pitch with the camera's ordinary downward angle.
+        let gamepad_owns_swim_pitch =
+            player.swimming && gamepad.zl <= 0.5;
+
+        if mouselook
+            && !gamepad_owns_swim_pitch
+            && aim_pitch != player.aim_pitch_seen
+        {
             player.aim_pitch_seen = aim_pitch;
-            player.mover_pitch = aim_pitch.clamp(-MOUSELOOK_PITCH_CLAMP, MOUSELOOK_PITCH_CLAMP);
+            player.mover_pitch =
+                aim_pitch.clamp(-MOUSELOOK_PITCH_CLAMP, MOUSELOOK_PITCH_CLAMP);
         }
         let mut swim_pitch = 0.0_f32;
         // Pre-step feet Y, the true take-off height: the step already rises one jump tick.

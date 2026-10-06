@@ -47,7 +47,7 @@ pub(crate) use script_input::Input;
 /// The chord-to-command map, rebuilt whenever the engine table's generation moves. Probe it
 /// through [`BindingDispatch::resolve`]: the lookup is two probes.
 #[derive(Resource, Default)]
-struct BindingDispatch {
+pub(crate) struct BindingDispatch {
     map: std::collections::HashMap<Chord, String>,
     /// The engine table's generation this map was built from, keyed per VM: a fresh VM restarts
     /// its counter at 0.
@@ -70,6 +70,23 @@ impl BindingDispatch {
             return None;
         }
         self.map.get(&chord.fallback()?).map(String::as_str)
+    }
+
+    pub(crate) fn dispatch_key(
+        &self,
+        script: &mut UiScript,
+        key: &str,
+    ) {
+        let Some(chord) = Chord::parse(key) else {
+            warn!("bindings: invalid key chord '{key}'");
+            return;
+        };
+
+        if let Some(command) = self.resolve(chord, false) {
+            if let Err(e) = script.execute_binding(command, true) {
+                warn!("bindings: dispatch {key}: {e}");
+            }
+        }
     }
 }
 
@@ -587,13 +604,21 @@ fn latch_and_dispatch(
         let was_pressed = gamepad.button_was_down(button);
 
         // ZL + A/B remain virtual-mouse controls.
-        // They must not enter the action-slot system.
-        let mouse_mode_button =
+        // ZL + X/Y are system controls (Jump / Escape).
+        // None of them should enter the action-slot system.
+        let system_button =
             gamepad.zl > 0.5
-                && matches!(button, GamepadButton::A | GamepadButton::B);
+                && matches!(
+                    button,
+                    GamepadButton::A
+                        | GamepadButton::B
+                        | GamepadButton::X
+                        | GamepadButton::Y
+                );
 
-        if mouse_mode_button {
-            // A/B are owned by virtual mouse mode while ZL is held.
+        if system_button {
+            // A/B are owned by virtual mouse mode.
+            // X/Y are owned by Jump / Escape.
             // Release any action-slot latch that might have existed.
             let latched = state.latched.iter().find_map(|(key, _)| {
                 match key {

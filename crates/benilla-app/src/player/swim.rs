@@ -358,22 +358,13 @@ pub(super) fn translate_amounts(
     if translate_gated {
         return (0.0, 0.0);
     }
+
     let swim_fwd = axes.fwd.signum() as f32;
-    let mut swim_side = 0.0_f32; // +right
-    if axes.strafe_right {
-        swim_side += 1.0;
-    }
-    if axes.strafe_left {
-        swim_side -= 1.0;
-    }
-    if axes.mouselook {
-        if axes.turn_right {
-            swim_side += 1.0;
-        }
-        if axes.turn_left {
-            swim_side -= 1.0;
-        }
-    }
+
+    // MoveAxes.side is already the final net strafe axis:
+    // gamepad left-stick X, keyboard A/D, and mouselook steering.
+    let swim_side = axes.side as f32;
+
     (swim_fwd, swim_side)
 }
 

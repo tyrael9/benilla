@@ -570,26 +570,26 @@ fn gamepad_utility_bindings(
     }
 
     // ========================================================
-    // LT + Y → Jump
+    // LT + X → Jump
     //
-    // ZL is the modifier; Y is the action.
-    // One-shot on Y press.
+    // ZL is the modifier; X is the action.
+    // One-shot on X press.
     // ========================================================
 
-    if lt && gamepad.y && !gamepad.prev_y {
+    if lt && gamepad.x && !gamepad.prev_x {
         if let Err(e) = script.execute_binding("JUMP", true) {
             warn!("gamepad: JUMP: {e}");
         }
     }
 
     // ========================================================
-    // LT + X → Escape / Back
+    // LT + Y → Escape / Back
     //
     // Actual Escape handling is UI-level and should use the
     // existing Escape input path.
     // ========================================================
 
-    if lt && gamepad.x && !gamepad.prev_x {
+    if lt && gamepad.y && !gamepad.prev_y {
         // Same path as a physical Escape key:
         // 1. Let the UI consume ESCAPE first.
         // 2. If nobody consumes it, dispatch the ESCAPE binding.

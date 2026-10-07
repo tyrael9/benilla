@@ -270,6 +270,8 @@ fn launch(build: BuildId, extend: Option<Extension<'_>>) -> AppExit {
 
     let mut app = App::new();
 
+    app.insert_resource(bevy::winit::WinitSettings::continuous());
+
     // SDL's macOS objects are !Send + !Sync, so keep them as a NonSend resource.
     if let Some(sdl_gamepad) = sdl_gamepad {
         app.insert_non_send_resource(sdl_gamepad);

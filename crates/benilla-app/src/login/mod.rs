@@ -580,6 +580,9 @@ pub(crate) struct LoginForm {
     pub(super) account: EditBoxState,
     pub(super) password: EditBoxState,
     pub(super) focus: Field,
+    /// Whether an edit box currently owns keyboard focus. The selected field is retained so a
+    /// later click can restore it, but a background click clears the caret/IME ownership.
+    pub(super) focused: bool,
     pub(super) save: bool,
 }
 
@@ -590,6 +593,7 @@ impl Default for LoginForm {
             // Masks the display; the real text is never rendered or copied.
             password: textinput::field(MAX_LETTERS, true),
             focus: Field::default(),
+            focused: true,
             save: false,
         }
     }
@@ -604,9 +608,17 @@ impl LoginForm {
     fn focus(&mut self, field: Field) {
         self.focused().highlight_text(0, 0);
         self.focus = field;
+        self.focused = true;
         let f = self.focused();
         f.highlight_text(0, -1);
         f.reset_blink();
+    }
+
+    fn clear_focus(&mut self) {
+        self.focused().highlight_text(0, 0);
+        self.focused = false;
+        self.focused().caret_shown = false;
+        self.focused().blink_accum = 0.0;
     }
 
     fn focused(&mut self) -> &mut EditBoxState {
@@ -701,6 +713,13 @@ fn login_input(
                         window.ime_enabled = true;
                     }
                 }
+                LoginAction::ClearFocus => {
+                    form.clear_focus();
+                    #[cfg(target_os = "ios")]
+                    if let Ok(mut window) = windows.single_mut() {
+                        window.ime_enabled = false;
+                    }
+                }
                 _ => {}
             }
         }
@@ -767,8 +786,9 @@ fn login_input(
             continue;
         }
         // The shared edit box first; what it leaves unclaimed is the screen's (Tab here, Enter
-        // and Escape below).
-        if textinput::feed_key(
+        // and Escape below). A background click can leave the selected field remembered, but it
+        // no longer owns keyboard input.
+        if form.focused && textinput::feed_key(
             form.focused(),
             ev,
             mods,
@@ -783,7 +803,7 @@ fn login_input(
             }
             continue;
         }
-        if ev.state == ButtonState::Pressed && ev.key_code == KeyCode::Tab {
+        if form.focused && ev.state == ButtonState::Pressed && ev.key_code == KeyCode::Tab {
             let next = match form.focus {
                 Field::Account => Field::Password,
                 Field::Password => Field::Account,
@@ -855,7 +875,7 @@ fn login_input(
 fn tick_login_caret(mut form: ResMut<LoginForm>, mut dialog: ResMut<GlueDialog>, time: Res<Time>) {
     let dt = time.delta_secs();
     let in_dialog = dialog.kind.is_some_and(DialogKind::has_edit_box);
-    textinput::tick_caret(form.focused(), !in_dialog, dt);
+    textinput::tick_caret(form.focused(), form.focused && !in_dialog, dt);
     if in_dialog {
         textinput::tick_caret(&mut dialog.edit, true, dt);
     }

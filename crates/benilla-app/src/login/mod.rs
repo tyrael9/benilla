@@ -659,8 +659,12 @@ fn enter_login(mut form: ResMut<LoginForm>, mut preview: ResMut<GluePreview>) {
 #[allow(clippy::type_complexity)]
 fn login_input(
     realms: Res<crate::realm_select::Realms>,
-    presses: Query<(Entity, &LoginAction, Ref<Interaction>)>,
-    dialog_edit: Query<(Entity, Ref<Interaction>), With<crate::glue::dialog::DialogEditFocus>>,
+    presses: Query<(
+        Entity,
+        Option<&LoginAction>,
+        Option<&crate::glue::dialog::DialogEditFocus>,
+        Ref<Interaction>,
+    )>,
     clicks: Res<crate::glue::GlueClicks>,
     mut keyboard: MessageReader<KeyboardInput>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -694,9 +698,12 @@ fn login_input(
     // system as the login fields. Its click must establish focus before KeyboardInput is consumed.
     #[cfg(target_os = "ios")]
     if dialog_open && dialog.kind == Some(DialogKind::Realmlist) {
-        for (entity, interaction) in &dialog_edit {
-            if interaction.is_changed() && *interaction == Interaction::Pressed {
-                let _ = entity;
+        for (_entity, action, edit_focus, interaction) in &presses {
+            if edit_focus.is_some()
+                && action.is_none()
+                && interaction.is_changed()
+                && *interaction == Interaction::Pressed
+            {
                 dialog.edit.focus();
                 if let Ok(mut window) = windows.single_mut() {
                     window.ime_enabled = true;
@@ -705,7 +712,11 @@ fn login_input(
         }
     }
 
-    for (entity, action, interaction) in &presses {
+    for (entity, action, edit_focus, interaction) in &presses {
+        if edit_focus.is_some() {
+            continue;
+        }
+        let Some(action) = action else { continue; };
         if dialog_open {
             continue;
         }

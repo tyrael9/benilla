@@ -660,6 +660,7 @@ fn enter_login(mut form: ResMut<LoginForm>, mut preview: ResMut<GluePreview>) {
 fn login_input(
     realms: Res<crate::realm_select::Realms>,
     presses: Query<(Entity, &LoginAction, Ref<Interaction>)>,
+    dialog_edit: Query<(Entity, Ref<Interaction>), With<crate::glue::dialog::DialogEditFocus>>,
     clicks: Res<crate::glue::GlueClicks>,
     mut keyboard: MessageReader<KeyboardInput>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -821,7 +822,14 @@ fn login_input(
     #[cfg(target_os = "ios")]
     if dialog_open {
         if let Ok(mut window) = windows.single_mut() {
-            window.ime_enabled = false;
+            window.ime_enabled = dialog.kind == Some(DialogKind::Realmlist);
+        }
+        if dialog.kind == Some(DialogKind::Realmlist) {
+            for (_entity, interaction) in &dialog_edit {
+                if interaction.is_changed() && **interaction == Interaction::Pressed {
+                    dialog.edit.reset_blink();
+                }
+            }
         }
     }
     if !dialog_open && keys.just_pressed(KeyCode::Escape) {

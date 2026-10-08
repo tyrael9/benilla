@@ -5,11 +5,11 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 TARGET="aarch64-apple-ios"
-PROFILE="\${PROFILE:-release}"
-APP="\${IOS_APP_DIR:-$ROOT/target/$TARGET/$PROFILE/Benilla.app}"
+PROFILE="${PROFILE:-release}"
+APP="${IOS_APP_DIR:-$ROOT/target/$TARGET/$PROFILE/Benilla.app}"
 BINARY="$ROOT/target/$TARGET/$PROFILE/benilla"
-BUNDLE_ID="\${IOS_BUNDLE_ID:-com.tyrael9.benilla}"
-DEVICE_UDID="\${IOS_DEVICE_UDID:-}"
+BUNDLE_ID="${IOS_BUNDLE_ID:-com.tyrael9.benilla}"
+DEVICE_UDID="${IOS_DEVICE_UDID:-}"
 
 echo "==> Building Benilla for iPhone..."
 cargo build -p benilla --profile "$PROFILE" --target "$TARGET"
@@ -24,12 +24,12 @@ cp "$ROOT/ios/Info.plist" "$APP/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $BUNDLE_ID" "$APP/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(git rev-list --count HEAD)" "$APP/Info.plist"
 
-if [[ "\${IOS_UNSIGNED:-0}" == "1" ]]; then
+if [[ "${IOS_UNSIGNED:-0}" == "1" ]]; then
     echo "==> Leaving app unsigned (IOS_UNSIGNED=1)"
     exit 0
 fi
 
-IDENTITY="\${IOS_CODE_SIGN_IDENTITY:-}"
+IDENTITY="${IOS_CODE_SIGN_IDENTITY:-}"
 if [[ -z "$IDENTITY" ]]; then
     IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null |
         sed -n 's/^[[:space:]]*[0-9]*) \([0-9A-F]\{40\}\) .*$/\1/p' | head -1 || true)"
@@ -40,11 +40,12 @@ if [[ -z "$IDENTITY" ]]; then
     exit 2
 fi
 
-PROFILE_PATH="\${IOS_PROVISIONING_PROFILE:-}"
+PROFILE_PATH="${IOS_PROVISIONING_PROFILE:-}"
 if [[ -z "$PROFILE_PATH" ]]; then
     PROFILE_PATH="$(find "$HOME/Library/MobileDevice/Provisioning Profiles" \
-        -type f -name '*.mobileprovision' -print0 2>/dev/null |
-        xargs -0 -r ls -t 2>/dev/null | head -1 || true)"
+        -type f -name '*.mobileprovision' -print 2>/dev/null | \
+        while IFS= read -r p; do stat -f '%m %N' "$p"; done | \
+        sort -nr | cut -d' ' -f2- | head -1 || true)"
 fi
 
 if [[ -z "$PROFILE_PATH" || ! -f "$PROFILE_PATH" ]]; then
@@ -61,7 +62,7 @@ ENTITLEMENTS="$TMPDIR_SIGN/entitlements.plist"
 
 TEAM_ID="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.developer.team-identifier' "$PROFILE_PLIST" 2>/dev/null || true)"
 PROFILE_APP_ID="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$PROFILE_PLIST" 2>/dev/null || true)"
-PROFILE_BUNDLE_ID="\${PROFILE_APP_ID#*.}"
+PROFILE_BUNDLE_ID="${PROFILE_APP_ID#*.}"
 
 echo "==> Signing identity: $IDENTITY"
 echo "==> Provisioning profile: $PROFILE_PATH"
@@ -91,7 +92,7 @@ codesign --force --sign "$IDENTITY" --timestamp=none \
 echo "==> Verifying signature..."
 codesign --verify --deep --strict --verbose=2 "$APP"
 
-if [[ "\${IOS_INSTALL:-0}" == "1" ]]; then
+if [[ "${IOS_INSTALL:-0}" == "1" ]]; then
     if [[ -z "$DEVICE_UDID" ]]; then
         DEVICE_UDID="$(xcrun devicectl list devices 2>/dev/null |
             awk '/connected/ {print $3; exit}' || true)"

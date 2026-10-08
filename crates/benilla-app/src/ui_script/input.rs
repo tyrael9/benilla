@@ -100,6 +100,9 @@ pub(super) fn feed_ui_input(
     mut gamepad: ResMut<crate::gamepad::GamepadState>,
     mut virtual_cursor: ResMut<crate::cursor::VirtualCursor>,
     mut virtual_mouse_buttons: ResMut<crate::cursor::VirtualMouseButtons>,
+    // iOS has touch input rather than a conventional OS mouse pointer.
+    touches: MessageReader<bevy::input::touch::TouchInput>,
+    touch_down: Local<bool>,
 ) {
     const GAMEPAD_MOUSE_SPEED: f32 = 700.0;
 
@@ -378,9 +381,48 @@ pub(super) fn feed_ui_input(
         }
     }
 
+    // ── iOS touch → WoW UI pointer ────────────────────────────────────────────────────────────
+    // Winit exposes touchscreen contacts as TouchInput, not CursorMoved/MouseButtonInput. The
+    // login screen has Bevy UI interactions, but the in-world WoW UI is driven by UiScript's
+    // mouse_move/mouse_button calls, so bridge a single finger here.
+    #[cfg(target_os = "ios")]
+    if !gamepad_mouse {
+        use bevy::input::touch::TouchPhase;
+        for touch in touches.read() {
+            let s = super::seam_scale(window.height(), ui_scale.0);
+            let (x, y) = (touch.position.x / s, (window.height() - touch.position.y) / s);
+            match touch.phase {
+                TouchPhase::Started => {
+                    *touch_down = true;
+                    hover.0 = script.mouse_move(x, y)
+                        .filter(|id| !script.is_world_frame(*id));
+                    script.mouse_button(x, y, "LeftButton", true);
+                }
+                TouchPhase::Moved if *touch_down => {
+                    hover.0 = script.mouse_move(x, y)
+                        .filter(|id| !script.is_world_frame(*id));
+                }
+                TouchPhase::Ended | TouchPhase::Canceled if *touch_down => {
+                    hover.0 = script.mouse_move(x, y)
+                        .filter(|id| !script.is_world_frame(*id));
+                    script.mouse_button(x, y, "LeftButton", false);
+                    *touch_down = false;
+                }
+                _ => {}
+            }
+        }
+    }
+
     // ── Keyboard capture gate ── read after the mouse feed (a click may have just focused a box)
     // and before the keys (an Escape that clears focus still counts as captured this frame).
     capture.typing = script.has_keyboard_focus();
+    // Match the login screen's iOS bridge: winit's iOS view presents UIKit's software keyboard
+    // only while IME is enabled. World EditBoxes (notably ChatFrameEditBox) never went through
+    // login_input, so without this the same focus worked on desktop but could not accept typing.
+    #[cfg(target_os = "ios")]
+    {
+        window.ime_enabled = capture.typing;
+    }
     capture.consumed.clear();
     // ── The alt-arrow exemption ────────────────────────────────────────────────────────────────
     // An EditBox in alt-arrow mode (`ignoreArrows`, set on the chat box at `ChatFrame.xml:21`)

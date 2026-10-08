@@ -102,7 +102,7 @@ pub(super) fn feed_ui_input(
     mut virtual_mouse_buttons: ResMut<crate::cursor::VirtualMouseButtons>,
     // iOS has touch input rather than a conventional OS mouse pointer.
     touches: MessageReader<bevy::input::touch::TouchInput>,
-    touch_down: Local<bool>,
+    touch_id: Local<Option<u64>>,
 ) {
     const GAMEPAD_MOUSE_SPEED: f32 = 700.0;
 
@@ -392,21 +392,21 @@ pub(super) fn feed_ui_input(
             let s = super::seam_scale(window.height(), ui_scale.0);
             let (x, y) = (touch.position.x / s, (window.height() - touch.position.y) / s);
             match touch.phase {
-                TouchPhase::Started => {
-                    *touch_down = true;
+                TouchPhase::Started if touch_id.is_none() => {
+                    *touch_id = Some(touch.id);
                     hover.0 = script.mouse_move(x, y)
                         .filter(|id| !script.is_world_frame(*id));
                     script.mouse_button(x, y, "LeftButton", true);
                 }
-                TouchPhase::Moved if *touch_down => {
+                TouchPhase::Moved if *touch_id == Some(touch.id) => {
                     hover.0 = script.mouse_move(x, y)
                         .filter(|id| !script.is_world_frame(*id));
                 }
-                TouchPhase::Ended | TouchPhase::Canceled if *touch_down => {
+                TouchPhase::Ended | TouchPhase::Canceled if *touch_id == Some(touch.id) => {
                     hover.0 = script.mouse_move(x, y)
                         .filter(|id| !script.is_world_frame(*id));
                     script.mouse_button(x, y, "LeftButton", false);
-                    *touch_down = false;
+                    *touch_id = None;
                 }
                 _ => {}
             }

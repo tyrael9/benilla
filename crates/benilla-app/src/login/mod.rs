@@ -690,6 +690,21 @@ fn login_input(
 
     let dialog_open = dialog.kind.is_some();
 
+    // The realmlist edit box is owned by GlueDialog, but focus/IME belongs to the same input
+    // system as the login fields. Its click must establish focus before KeyboardInput is consumed.
+    #[cfg(target_os = "ios")]
+    if dialog_open && dialog.kind == Some(DialogKind::Realmlist) {
+        for (entity, interaction) in &dialog_edit {
+            if interaction.is_changed() && *interaction == Interaction::Pressed {
+                let _ = entity;
+                dialog.edit.focus();
+                if let Ok(mut window) = windows.single_mut() {
+                    window.ime_enabled = true;
+                }
+            }
+        }
+    }
+
     for (entity, action, interaction) in &presses {
         if dialog_open {
             continue;

@@ -875,7 +875,8 @@ fn login_input(
 fn tick_login_caret(mut form: ResMut<LoginForm>, mut dialog: ResMut<GlueDialog>, time: Res<Time>) {
     let dt = time.delta_secs();
     let in_dialog = dialog.kind.is_some_and(DialogKind::has_edit_box);
-    textinput::tick_caret(form.focused(), form.focused && !in_dialog, dt);
+    let form_focused = form.focused;
+    textinput::tick_caret(form.focused(), form_focused && !in_dialog, dt);
     if in_dialog {
         textinput::tick_caret(&mut dialog.edit, true, dt);
     }

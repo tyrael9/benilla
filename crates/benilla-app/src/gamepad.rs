@@ -288,16 +288,17 @@ struct IosDiagnosticsFps {
 #[cfg(target_os = "ios")]
 fn setup_ios_diagnostics(mut commands: Commands) {
     commands.spawn((
-        Text::new("FPS --  WINDOW --x--  PHYSICAL --x--  SCALE -.--"),
+        Text::new("FPS --  BEVY --x--  SCREEN --x--"),
         TextFont {
-            font_size: 14.0,
+            // This HUD is diagnostic-only; keep it small enough for the phone in landscape.
+            font_size: 9.0,
             ..default()
         },
         TextColor(Color::WHITE),
         TextLayout::new_with_justify(Justify::Center),
         Node {
             position_type: PositionType::Absolute,
-            top: px(8.0),
+            top: px(4.0),
             left: px(0.0),
             right: px(0.0),
             width: percent(100.0),
@@ -338,14 +339,37 @@ fn update_ios_diagnostics(
     let logical_w = physical_w as f32 / scale;
     let logical_h = physical_h as f32 / scale;
 
+    // UIKit reports bounds in points and nativeBounds in physical pixels.
+    // nativeBounds is portrait-oriented even when the phone is in landscape.
+    let (screen_w, screen_h, native_w, native_h, screen_scale, native_scale) = unsafe {
+        use objc2_ui_kit::UIScreen;
+        let screen = UIScreen::mainScreen();
+        let bounds = screen.bounds();
+        let native_bounds = screen.nativeBounds();
+        (
+            bounds.size.width,
+            bounds.size.height,
+            native_bounds.size.width,
+            native_bounds.size.height,
+            screen.scale(),
+            screen.nativeScale(),
+        )
+    };
+
     *text = Text::new(format!(
-        "FPS {:>5.1}   WINDOW {:>5.0}x{:>5.0}   PHYSICAL {:>4}x{:>4}   SCALE {:.2}",
+        "FPS {:>4.1}  BEVY {:>4.0}x{:>4.0} / {:>4}x{:>4} @ {:.2}\nSCREEN {:>4.0}x{:>4.0}  NATIVE {:>4.0}x{:>4.0}  SCALE {:.2}/{:.2}",
         fps.fps,
         logical_w,
         logical_h,
         physical_w,
         physical_h,
         scale,
+        screen_w,
+        screen_h,
+        native_w,
+        native_h,
+        screen_scale,
+        native_scale,
     ));
 }
 

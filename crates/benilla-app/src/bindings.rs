@@ -23,7 +23,7 @@
 //! Persistence: `benilla-config/bindings/account.txt` and `<Realm>-<Char>.txt` ([`store`]); the
 //! character file's existence is the character-set state, as in the reference.
 
-use bevy::input::keyboard::{Key, KeyboardInput};
+use bevy::input::keyboard::KeyboardInput;
 use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::input::ButtonState;
 use bevy::prelude::*;
@@ -422,24 +422,15 @@ fn latch_and_dispatch(
     // ── The pressed-key reconcile ── against bevy's button planes, before this frame's messages:
     // a release the window never saw drops off the list, and a window deactivate empties it, the
     // reference's `0x424790` wipe, so a key held across an alt-tab re-latches on its next repeat.
-    #[cfg(not(target_os = "ios"))]
     state
         .down
         .retain(|&kc| physically_down(Held::Key(kc), &keys, &buttons, &gamepad));
-    // On iOS the Mac keyboard path may have a logical character but no physical KeyCode in
-    // Bevy's ButtonInput<KeyCode>. Releases are still explicit KeyboardInput events, so the
-    // event-driven list is authoritative and must not be reconciled against the empty physical
-    // plane every frame.
 
     // ── Keyboard ── press edges run their command, gated on ownership and the capture arm;
     // release edges unlatch and run the `runOnUp` up-half.
     let typing = capture.typing;
     for ev in keyboard.read() {
-        #[cfg(target_os = "ios")]
-        let binding_key = ios_binding_key(ev);
-        #[cfg(not(target_os = "ios"))]
-        let binding_key = ev.key_code;
-        let key = chord::normalize_key(binding_key);
+        let key = chord::normalize_key(ev.key_code);
         match ev.state {
             ButtonState::Pressed => {
                 // A focused box in alt-arrow mode declines the four arrows, so their bindings
@@ -457,7 +448,7 @@ fn latch_and_dispatch(
                 let eaten = capture.consumed.contains(&ev.key_code);
                 // A repeat is a key we already believe is down, the reference's test. Recorded
                 // before the gates below, so a key held through a focused box stays down.
-                let repeat = ev.repeat || state.down.contains(&key);
+                let repeat = state.down.contains(&key);
                 if !repeat {
                     state.down.push(key);
                 }
@@ -767,51 +758,6 @@ fn gamepad_slot(button: GamepadButton, modifier: GamepadModifier) -> Option<&'st
 /// Is this input physically down, per bevy's button planes? The stuck-latch sweep and the
 /// pressed-key reconcile must agree, so both ask here. `ENTER` is down while either physical
 /// key is, since [`chord::normalize_key`] folds `NUMPADENTER` into it.
-/// iOS/iPhone Mirroring can provide the logical character while the physical key code is
-/// unavailable. Keep the normal physical path everywhere else, but map ASCII letters so the
-/// existing WoW binding table (W/A/S/D, etc.) still works from a Mac keyboard mirrored to iPhone.
-#[cfg(target_os = "ios")]
-fn ios_binding_key(ev: &KeyboardInput) -> KeyCode {
-    if ev.key_code != KeyCode::Unidentified {
-        return ev.key_code;
-    }
-    let Some(ch) = (match &ev.logical_key {
-        Key::Character(s) => s.chars().next(),
-        _ => None,
-    }) else {
-        return ev.key_code;
-    };
-    match ch.to_ascii_lowercase() {
-        'a' => KeyCode::KeyA,
-        'b' => KeyCode::KeyB,
-        'c' => KeyCode::KeyC,
-        'd' => KeyCode::KeyD,
-        'e' => KeyCode::KeyE,
-        'f' => KeyCode::KeyF,
-        'g' => KeyCode::KeyG,
-        'h' => KeyCode::KeyH,
-        'i' => KeyCode::KeyI,
-        'j' => KeyCode::KeyJ,
-        'k' => KeyCode::KeyK,
-        'l' => KeyCode::KeyL,
-        'm' => KeyCode::KeyM,
-        'n' => KeyCode::KeyN,
-        'o' => KeyCode::KeyO,
-        'p' => KeyCode::KeyP,
-        'q' => KeyCode::KeyQ,
-        'r' => KeyCode::KeyR,
-        's' => KeyCode::KeyS,
-        't' => KeyCode::KeyT,
-        'u' => KeyCode::KeyU,
-        'v' => KeyCode::KeyV,
-        'w' => KeyCode::KeyW,
-        'x' => KeyCode::KeyX,
-        'y' => KeyCode::KeyY,
-        'z' => KeyCode::KeyZ,
-        _ => ev.key_code,
-    }
-}
-
 fn physically_down(
     key: Held,
     keys: &ButtonInput<KeyCode>,

@@ -478,8 +478,8 @@ fn poll_gamepad(
 
         // GameController already returns normalized, deadzoned axis values.
         // Match the existing SDL convention: +Y means forward/up.
-        state.move_stick = Vec2::new(left.xAxis().value(), -left.yAxis().value());
-        state.look_stick = Vec2::new(right.xAxis().value(), right.yAxis().value());
+        state.move_stick = Vec2::new(left.xAxis().value(), left.yAxis().value());
+        state.look_stick = Vec2::new(right.xAxis().value(), -right.yAxis().value());
 
         state.a = gamepad.buttonA().isPressed();
         state.b = gamepad.buttonB().isPressed();
@@ -496,8 +496,8 @@ fn poll_gamepad(
 
         // Apple has Menu/Options rather than SDL's Back/Start pair.
         // Menu is the natural WoW "minus/back" equivalent; Options is "plus/map".
-        state.minus = gamepad.buttonMenu().isPressed();
-        state.plus = gamepad.buttonOptions().is_some_and(|button| button.isPressed());
+        state.minus = gamepad.buttonOptions().is_some_and(|button| button.isPressed());
+        state.plus = gamepad.buttonMenu().isPressed();
 
         state.l3 = gamepad
             .leftThumbstickButton()

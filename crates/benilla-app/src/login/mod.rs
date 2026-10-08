@@ -962,6 +962,8 @@ fn accept_realmlist(
         return false;
     };
     realmlist.set(&address);
+    #[cfg(target_os = "ios")]
+    crate::realmlist::save_ios_realmlist(&address);
     let name = crate::realmlist::CVAR_REALMLIST;
     match script {
         Some(script) => {

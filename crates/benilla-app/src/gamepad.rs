@@ -273,6 +273,82 @@ fn gamepad_debug_enabled() -> bool {
     std::env::var("BENILLA_GAMEPAD_DEBUG").as_deref() == Ok("1")
 }
 
+#[cfg(target_os = "ios")]
+#[derive(Component)]
+struct IosDiagnosticsText;
+
+#[cfg(target_os = "ios")]
+#[derive(Resource, Default)]
+struct IosDiagnosticsFps {
+    elapsed: f32,
+    frames: u32,
+    fps: f32,
+}
+
+#[cfg(target_os = "ios")]
+fn setup_ios_diagnostics(mut commands: Commands) {
+    commands.spawn((
+        Text::new("FPS --  WINDOW --x--  PHYSICAL --x--  SCALE -.--"),
+        TextFont {
+            font_size: 14.0,
+            ..default()
+        },
+        TextColor(Color::WHITE),
+        TextLayout::new_with_justify(Justify::Center),
+        Node {
+            position_type: PositionType::Absolute,
+            top: px(8.0),
+            left: px(0.0),
+            right: px(0.0),
+            width: percent(100.0),
+            ..default()
+        },
+        IosDiagnosticsText,
+    ));
+}
+
+#[cfg(target_os = "ios")]
+fn update_ios_diagnostics(
+    time: Res<Time>,
+    mut fps: ResMut<IosDiagnosticsFps>,
+    window: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    mut text: Query<&mut Text, With<IosDiagnosticsText>>,
+) {
+    fps.elapsed += time.delta_secs();
+    fps.frames += 1;
+
+    if fps.elapsed < 0.25 {
+        return;
+    }
+
+    fps.fps = fps.frames as f32 / fps.elapsed.max(0.001);
+    fps.elapsed = 0.0;
+    fps.frames = 0;
+
+    let Ok(window) = window.single() else {
+        return;
+    };
+    let Ok(mut text) = text.single_mut() else {
+        return;
+    };
+
+    let logical_w = window.resolution.logical_width();
+    let logical_h = window.resolution.logical_height();
+    let physical_w = window.resolution.physical_width();
+    let physical_h = window.resolution.physical_height();
+    let scale = window.resolution.scale_factor();
+
+    *text = Text::new(format!(
+        "FPS {:>5.1}   WINDOW {:>5.0}x{:>5.0}   PHYSICAL {:>4}x{:>4}   SCALE {:.2}",
+        fps.fps,
+        logical_w,
+        logical_h,
+        physical_w,
+        physical_h,
+        scale,
+    ));
+}
+
 
 // ============================================================
 // Plugin
@@ -284,9 +360,18 @@ impl Plugin for GamepadPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GamepadState>()
             .add_systems(
-                Startup, 
+                Startup,
                 setup_gamepad_debug_overlay.run_if(gamepad_debug_enabled),
             )
+            .add_systems(
+                Startup,
+                setup_ios_diagnostics.run_if(|| cfg!(target_os = "ios")),
+            )
+            .add_systems(
+                Update,
+                update_ios_diagnostics.run_if(|| cfg!(target_os = "ios")),
+            )
+            .init_resource::<IosDiagnosticsFps>()
             .add_systems(
                 Update,
                 poll_gamepad.before(crate::bindings::BindingSet),

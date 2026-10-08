@@ -67,9 +67,20 @@ mint = "0.5"
 # The gossip greeting's weighted draw, re-rolled per open as in the reference.
 rand = "0.8"
 
-# SDL3 is the desktop gamepad backend. iOS will use Apple GameController instead.
+# SDL3 is the desktop gamepad backend. iOS uses Apple's GameController framework instead.
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 sdl3 = { version = "0.16.0", features = ["build-from-source"] }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2-game-controller = { version = "0.3.2", default-features = false, features = [
+    "GCController",
+    "GCExtendedGamepad",
+    "GCPhysicalInputProfile",
+    "GCControllerElement",
+    "GCControllerButtonInput",
+    "GCControllerDirectionPad",
+    "GCControllerAxisInput",
+] }
 
 # Wayland clipboard over the standard `wl_data_device`; arboard's speaks `wlr-data-control`,
 # which GNOME does not implement.

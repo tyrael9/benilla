@@ -654,6 +654,7 @@ fn login_input(
     // The pasteboard, and the layout that names the clipboard chords' letters.
     (mut clipboard, layout): (NonSendMut<HostClipboard>, Res<crate::bindings::LayoutNames>),
     raw_handle: Query<&bevy::window::RawHandleWrapper, With<bevy::window::PrimaryWindow>>,
+    mut windows: Query<&mut bevy::window::Window, With<bevy::window::PrimaryWindow>>,
     mut form: ResMut<LoginForm>,
     mut attempt: Attempt,
     mut dialog: ResMut<GlueDialog>,
@@ -684,8 +685,22 @@ fn login_input(
         // unconditionally, without waiting for a release.
         if interaction.is_changed() && *interaction == Interaction::Pressed {
             match action {
-                LoginAction::FocusAccount => form.focus(Field::Account),
-                LoginAction::FocusPassword => form.focus(Field::Password),
+                LoginAction::FocusAccount => {
+                    form.focus(Field::Account);
+                    #[cfg(target_os = "ios")]
+                    if let Ok(mut window) = windows.single_mut() {
+                        // winit's iOS WinitView implements UIKeyInput; enabling IME makes it
+                        // become first responder and lets UIKit present the software keyboard.
+                        window.ime_enabled = true;
+                    }
+                }
+                LoginAction::FocusPassword => {
+                    form.focus(Field::Password);
+                    #[cfg(target_os = "ios")]
+                    if let Ok(mut window) = windows.single_mut() {
+                        window.ime_enabled = true;
+                    }
+                }
                 _ => {}
             }
         }
@@ -782,6 +797,13 @@ fn login_input(
     {
         do_login = true;
     }
+
+    #[cfg(target_os = "ios")]
+    if dialog_open {
+        if let Ok(mut window) = windows.single_mut() {
+            window.ime_enabled = false;
+        }
+    }
     if !dialog_open && keys.just_pressed(KeyCode::Escape) {
         do_quit = true;
     }
@@ -813,6 +835,10 @@ fn login_input(
                 let (user, pass) = (form.account.text.clone(), form.password.text.clone());
                 form.password.set_text("");
                 dialog.open_status(strings.text("LOGIN_STATE_CONNECTING", "Connecting"));
+                #[cfg(target_os = "ios")]
+                if let Ok(mut window) = windows.single_mut() {
+                    window.ime_enabled = false;
+                }
                 attempt.send(&user, &pass, true);
             }
         }

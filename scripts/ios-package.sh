@@ -10,6 +10,7 @@ APP="${IOS_APP_DIR:-$ROOT/target/$TARGET/$PROFILE/Benilla.app}"
 BINARY="$ROOT/target/$TARGET/$PROFILE/benilla"
 BUNDLE_ID="${IOS_BUNDLE_ID:-com.tyrael9.benilla}"
 DEVICE_UDID="${IOS_DEVICE_UDID:-}"
+DATA_SOURCE="${WOW_DATA:-$ROOT/WoW/Data}"
 
 echo "==> Building Benilla for iPhone..."
 cargo build -p benilla --profile "$PROFILE" --target "$TARGET"
@@ -21,6 +22,16 @@ mkdir -p "$APP"
 
 cp "$BINARY" "$APP/benilla"
 cp "$ROOT/ios/Info.plist" "$APP/Info.plist"
+
+if [[ ! -d "$DATA_SOURCE" ]]; then
+    echo "error: WoW Data directory not found: $DATA_SOURCE" >&2
+    echo "Set WOW_DATA=/path/to/your/1.12.1/Data or provide $ROOT/WoW/Data." >&2
+    exit 1
+fi
+
+echo "==> Bundling WoW Data from: $DATA_SOURCE"
+mkdir -p "$APP/Data"
+rsync -a "$DATA_SOURCE/" "$APP/Data/"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $BUNDLE_ID" "$APP/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(git rev-list --count HEAD)" "$APP/Info.plist"
 

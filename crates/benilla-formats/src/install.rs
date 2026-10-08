@@ -51,6 +51,49 @@ fn benilla_checkout() -> Option<&'static Path> {
     Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2)
 }
 
+/// On iOS, seed the persistent app container from a bundled Data directory once.
+#[cfg(target_os = "ios")]
+pub fn prepare_ios_data() {
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else { return; };
+    let Some(bundle) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) else { return; };
+    let bundled = bundle.join("Data");
+    if !bundled.is_dir() { return; }
+    let persistent = home.join("Library/Application Support/Benilla/Data");
+    let marker = persistent.join(".benilla-ready");
+    if marker.is_file() { return; }
+    let staging = persistent.with_extension("installing");
+    eprintln!("benilla: seeding WoW Data into the app container (first launch only)...");
+    let _ = std::fs::remove_dir_all(&staging);
+    if let Err(e) = copy_dir_recursive(&bundled, &staging) {
+        eprintln!("benilla: failed to seed WoW Data: {e}");
+        let _ = std::fs::remove_dir_all(&staging);
+        return;
+    }
+    let _ = std::fs::remove_dir_all(&persistent);
+    if let Err(e) = std::fs::rename(&staging, &persistent) {
+        eprintln!("benilla: failed to activate persistent Data directory: {e}");
+        let _ = std::fs::remove_dir_all(&staging);
+        return;
+    }
+    if let Err(e) = std::fs::write(&marker, b"ready\n") {
+        eprintln!("benilla: failed to write Data marker: {e}");
+    } else {
+        eprintln!("benilla: WoW Data is now persistent; future installs can omit the bundle copy.");
+    }
+}
+
+#[cfg(target_os = "ios")]
+fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if from.is_dir() { copy_dir_recursive(&from, &to)?; } else { std::fs::copy(&from, &to)?; }
+    }
+    Ok(())
+}
+
 /// The vanilla `Data` directory, or `None` when there is no install. Uncached, so a `$WOW_DATA`
 /// change is seen.
 pub fn wow_data() -> Option<PathBuf> {

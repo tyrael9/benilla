@@ -343,7 +343,7 @@ fn update_ios_diagnostics(
     // nativeBounds is portrait-oriented even when the phone is in landscape.
     let (screen_w, screen_h, native_w, native_h, screen_scale, native_scale) = unsafe {
         use objc2_ui_kit::UIScreen;
-        let screen = unsafe { UIScreen::mainScreen() };
+        let Some(mtm) = objc2::main_thread_marker::MainThreadMarker::new() else {\n            return;\n        };\n        let screen = UIScreen::mainScreen(mtm);
         let bounds = screen.bounds();
         let native_bounds = screen.nativeBounds();
         (

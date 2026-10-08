@@ -728,7 +728,7 @@ fn login_input(
             continue;
         }
         match action {
-            LoginAction::FocusAccount | LoginAction::FocusPassword => {} // focused on the press
+            LoginAction::FocusAccount | LoginAction::FocusPassword | LoginAction::ClearFocus => {} // handled on press
             LoginAction::Login => do_login = true,
             LoginAction::Quit => do_quit = true,
             LoginAction::Realmlist => {

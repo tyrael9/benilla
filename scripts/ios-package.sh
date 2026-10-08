@@ -11,13 +11,18 @@ BINARY="$ROOT/target/$TARGET/$PROFILE/benilla"
 BUNDLE_ID="${IOS_BUNDLE_ID:-com.tyrael9.benilla}"
 DEVICE_UDID="${IOS_DEVICE_UDID:-}"
 DATA_SOURCE="${WOW_DATA:-$ROOT/WoW/Data}"
+ADDONS_SOURCE="${IOS_BUNDLE_ADDONS:-}"
 INSTALL_ONLY=0
 if [[ "${1:-}" == "--install-only" ]]; then
     INSTALL_ONLY=1
     shift
+elif [[ "${1:-}" == "--bundle-addons" ]]; then
+    [[ "$#" -eq 2 ]] || { echo "usage: $0 --bundle-addons /path/to/AddOns" >&2; exit 64; }
+    ADDONS_SOURCE="$2"
+    shift 2
 fi
 if [[ "$#" -ne 0 ]]; then
-    echo "usage: $0 [--install-only]" >&2
+    echo "usage: $0 [--install-only] | [--bundle-addons /path/to/AddOns]" >&2
     exit 64
 fi
 
@@ -63,6 +68,20 @@ if [[ "${IOS_BUNDLE_DATA:-0}" == "1" ]]; then
     rsync -a "$DATA_SOURCE/" "$APP/Data/"
 else
     echo "==> Skipping WoW Data bundle (persistent iOS app container is used)"
+fi
+
+if [[ -n "$ADDONS_SOURCE" ]]; then
+    if [[ ! -d "$ADDONS_SOURCE" ]]; then
+        echo "error: AddOns directory not found: $ADDONS_SOURCE" >&2
+        exit 1
+    fi
+    echo "==> Bundling AddOns for iOS bootstrap from: $ADDONS_SOURCE"
+    mkdir -p "$APP/Interface"
+    rm -rf "$APP/Interface/AddOns"
+    mkdir -p "$APP/Interface/AddOns"
+    rsync -a "$ADDONS_SOURCE/" "$APP/Interface/AddOns/"
+else
+    echo "==> Skipping AddOns bundle (persistent iOS app container is used)"
 fi
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $BUNDLE_ID" "$APP/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(git rev-list --count HEAD)" "$APP/Info.plist"

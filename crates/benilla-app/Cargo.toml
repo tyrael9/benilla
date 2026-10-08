@@ -80,6 +80,10 @@ objc2-game-controller = { version = "0.3.2", default-features = false, features 
     "GCControllerButtonInput",
     "GCControllerDirectionPad",
     "GCControllerAxisInput",
+] },
+objc2-ui-kit = { version = "0.3.2", default-features = false, features = [
+    "UIScreen",
+    "objc2-core-foundation",
 ] }
 
 # Wayland clipboard over the standard `wl_data_device`; arboard's speaks `wlr-data-control`,

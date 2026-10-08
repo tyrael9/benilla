@@ -23,7 +23,7 @@ pub use install::{
     wow_data,
 };
 #[cfg(target_os = "ios")]
-pub use install::prepare_ios_data;
+pub use install::{prepare_ios_addons, prepare_ios_data};
 
 mod characters;
 pub use characters::{

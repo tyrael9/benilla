@@ -363,15 +363,11 @@ impl Plugin for GamepadPlugin {
                 Startup,
                 setup_gamepad_debug_overlay.run_if(gamepad_debug_enabled),
             )
-            .add_systems(
-                Startup,
-                setup_ios_diagnostics.run_if(|| cfg!(target_os = "ios")),
-            )
-            .add_systems(
-                Update,
-                update_ios_diagnostics.run_if(|| cfg!(target_os = "ios")),
-            )
-            .init_resource::<IosDiagnosticsFps>()
+
+        #[cfg(target_os = "ios")]
+        app.init_resource::<IosDiagnosticsFps>()
+            .add_systems(Startup, setup_ios_diagnostics)
+            .add_systems(Update, update_ios_diagnostics);
             .add_systems(
                 Update,
                 poll_gamepad.before(crate::bindings::BindingSet),

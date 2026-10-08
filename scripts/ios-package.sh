@@ -5,10 +5,11 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 TARGET="aarch64-apple-ios"
-PROFILE="${PROFILE:-release}"
-APP="${IOS_APP_DIR:-$ROOT/target/$TARGET/$PROFILE/Benilla.app}"
+PROFILE="\${PROFILE:-release}"
+APP="\${IOS_APP_DIR:-$ROOT/target/$TARGET/$PROFILE/Benilla.app}"
 BINARY="$ROOT/target/$TARGET/$PROFILE/benilla"
-BUNDLE_ID="${IOS_BUNDLE_ID:-com.tyrael9.benilla}"
+BUNDLE_ID="\${IOS_BUNDLE_ID:-com.tyrael9.benilla}"
+DEVICE_UDID="\${IOS_DEVICE_UDID:-}"
 
 echo "==> Building Benilla for iPhone..."
 cargo build -p benilla --profile "$PROFILE" --target "$TARGET"
@@ -23,46 +24,85 @@ cp "$ROOT/ios/Info.plist" "$APP/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $BUNDLE_ID" "$APP/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(git rev-list --count HEAD)" "$APP/Info.plist"
 
-echo "==> App bundle:"
-echo "    $APP"
-echo "==> Executable:"
-file "$APP/benilla"
-
-if [[ "${IOS_UNSIGNED:-0}" == "1" ]]; then
+if [[ "\${IOS_UNSIGNED:-0}" == "1" ]]; then
     echo "==> Leaving app unsigned (IOS_UNSIGNED=1)"
     exit 0
 fi
 
-IDENTITY="${IOS_CODE_SIGN_IDENTITY:-}"
+IDENTITY="\${IOS_CODE_SIGN_IDENTITY:-}"
 if [[ -z "$IDENTITY" ]]; then
     IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null |
         sed -n 's/^[[:space:]]*[0-9]*) \([0-9A-F]\{40\}\) .*$/\1/p' | head -1 || true)"
 fi
 
 if [[ -z "$IDENTITY" ]]; then
-    echo
-    echo "No Apple code-signing identity was found."
-    echo "The .app is complete but unsigned."
-    echo
-    echo "To inspect identities:"
-    echo "  security find-identity -v -p codesigning"
-    echo
-    echo "To build without signing:"
-    echo "  IOS_UNSIGNED=1 scripts/ios-package.sh"
+    echo "error: no Apple code-signing identity found." >&2
     exit 2
 fi
 
-echo "==> Signing with $IDENTITY..."
-codesign --force --sign "$IDENTITY" --timestamp=none --deep "$APP"
-
-echo "==> Signature:"
-codesign -dvv "$APP" 2>&1 | sed -n '1,14p'
-
-if command -v xcrun >/dev/null 2>&1 && xcrun devicectl list devices >/dev/null 2>&1; then
-    echo
-    echo "==> Connected devices:"
-    xcrun devicectl list devices
-    echo
-    echo "Install with:"
-    echo "  xcrun devicectl device install app --device <DEVICE_UDID> '$APP'"
+PROFILE_PATH="\${IOS_PROVISIONING_PROFILE:-}"
+if [[ -z "$PROFILE_PATH" ]]; then
+    PROFILE_PATH="$(find "$HOME/Library/MobileDevice/Provisioning Profiles" \
+        -type f -name '*.mobileprovision' -print0 2>/dev/null |
+        xargs -0 -r ls -t 2>/dev/null | head -1 || true)"
 fi
+
+if [[ -z "$PROFILE_PATH" || ! -f "$PROFILE_PATH" ]]; then
+    echo "error: no provisioning profile found." >&2
+    exit 3
+fi
+
+TMPDIR_SIGN="$(mktemp -d)"
+trap 'rm -rf "$TMPDIR_SIGN"' EXIT
+PROFILE_PLIST="$TMPDIR_SIGN/profile.plist"
+ENTITLEMENTS="$TMPDIR_SIGN/entitlements.plist"
+
+/usr/bin/security cms -D -i "$PROFILE_PATH" -o "$PROFILE_PLIST"
+
+TEAM_ID="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.developer.team-identifier' "$PROFILE_PLIST" 2>/dev/null || true)"
+PROFILE_APP_ID="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$PROFILE_PLIST" 2>/dev/null || true)"
+PROFILE_BUNDLE_ID="\${PROFILE_APP_ID#*.}"
+
+echo "==> Signing identity: $IDENTITY"
+echo "==> Provisioning profile: $PROFILE_PATH"
+echo "    Team ID: $TEAM_ID"
+echo "    App ID:  $PROFILE_APP_ID"
+
+if [[ -z "$TEAM_ID" || -z "$PROFILE_APP_ID" ]]; then
+    echo "error: provisioning profile has no usable app/team identifier." >&2
+    exit 4
+fi
+
+if [[ "$PROFILE_BUNDLE_ID" != "*" && "$PROFILE_BUNDLE_ID" != "$BUNDLE_ID" ]]; then
+    echo "error: provisioning profile does not match $BUNDLE_ID (profile is $PROFILE_APP_ID)." >&2
+    echo "Use IOS_PROVISIONING_PROFILE=... with a matching profile, or set IOS_BUNDLE_ID." >&2
+    exit 5
+fi
+
+/usr/bin/plutil -extract Entitlements xml1 -o "$ENTITLEMENTS" "$PROFILE_PLIST"
+/usr/libexec/PlistBuddy -c "Set :application-identifier $TEAM_ID.$BUNDLE_ID" "$ENTITLEMENTS"
+
+cp "$PROFILE_PATH" "$APP/embedded.mobileprovision"
+
+echo "==> Signing..."
+codesign --force --sign "$IDENTITY" --timestamp=none \
+    --entitlements "$ENTITLEMENTS" "$APP/benilla"
+
+echo "==> Verifying signature..."
+codesign --verify --deep --strict --verbose=2 "$APP"
+
+if [[ "\${IOS_INSTALL:-0}" == "1" ]]; then
+    if [[ -z "$DEVICE_UDID" ]]; then
+        DEVICE_UDID="$(xcrun devicectl list devices 2>/dev/null |
+            awk '/connected/ {print $3; exit}' || true)"
+    fi
+    if [[ -z "$DEVICE_UDID" ]]; then
+        echo "error: no connected iPhone found." >&2
+        exit 6
+    fi
+    echo "==> Installing on $DEVICE_UDID..."
+    xcrun devicectl device install app --device "$DEVICE_UDID" "$APP"
+fi
+
+echo
+echo "==> Done: $APP"

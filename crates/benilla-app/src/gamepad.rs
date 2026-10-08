@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+#[cfg(not(target_os = "ios"))]
 use sdl3::gamepad::{Axis, Button, Gamepad};
 use benilla_ui::script::{NearestMode, ScriptCall, UiScript};
 use crate::bindings::BindingDispatch;
@@ -209,10 +210,14 @@ impl GamepadState {
 // panic.
 // ============================================================
 
+#[cfg(not(target_os = "ios"))]
 pub(crate) struct SdlGamepad {
     pub(crate) _sdl: sdl3::Sdl,
     pub(crate) gamepad: Gamepad,
 }
+
+#[cfg(target_os = "ios")]
+pub(crate) struct SdlGamepad;
 
 
 // ============================================================
@@ -221,79 +226,41 @@ pub(crate) struct SdlGamepad {
 // Call this BEFORE app.run().
 // ============================================================
 
+#[cfg(not(target_os = "ios"))]
 pub(crate) fn init_sdl(gamepad_index: usize) -> Option<SdlGamepad> {
     println!("SDL: init");
 
     let sdl = match sdl3::init() {
-        Ok(sdl) => {
-            println!("SDL: sdl3::init OK");
-            sdl
-        }
-        Err(err) => {
-            println!("SDL: init FAILED: {err}");
-            return None;
-        }
+        Ok(sdl) => { println!("SDL: sdl3::init OK"); sdl }
+        Err(err) => { println!("SDL: init FAILED: {err}"); return None; }
     };
-
-    println!("SDL: getting gamepad subsystem");
-
     let gamepad_subsystem = match sdl.gamepad() {
-        Ok(gamepad) => {
-            println!("SDL: gamepad subsystem OK");
-            gamepad
-        }
-        Err(err) => {
-            println!("SDL: gamepad subsystem FAILED: {err}");
-            return None;
-        }
+        Ok(gamepad) => { println!("SDL: gamepad subsystem OK"); gamepad }
+        Err(err) => { println!("SDL: gamepad subsystem FAILED: {err}"); return None; }
     };
-
-    println!("SDL: enumerating gamepads");
-
     let ids = match gamepad_subsystem.gamepads() {
         Ok(ids) => {
             println!("SDL: gamepads() OK, count = {}", ids.len());
-
-            for id in &ids {
-                println!(
-                    "SDL GAMEPAD: {:?} {:?}",
-                    id,
-                    gamepad_subsystem.name_for_id(*id)
-                );
-            }
-
+            for id in &ids { println!("SDL GAMEPAD: {:?} {:?}", id, gamepad_subsystem.name_for_id(*id)); }
             ids
         }
-        Err(err) => {
-            println!("SDL: gamepads() FAILED: {err}");
-            return None;
-        }
+        Err(err) => { println!("SDL: gamepads() FAILED: {err}"); return None; }
     };
-
     let Some(id) = ids.get(gamepad_index).copied() else {
         println!("SDL: NO GAMEPAD");
         return None;
     };
-
-    println!("SDL: opening gamepad {:?}", id);
-
     let gamepad = match gamepad_subsystem.open(id) {
-        Ok(gamepad) => {
-            println!("SDL: gamepad opened OK");
-            gamepad
-        }
-        Err(err) => {
-            println!("SDL: gamepad open FAILED: {err}");
-            return None;
-        }
+        Ok(gamepad) => { println!("SDL: gamepad opened OK"); gamepad }
+        Err(err) => { println!("SDL: gamepad open FAILED: {err}"); return None; }
     };
-
-    Some(SdlGamepad {
-        _sdl: sdl,
-        gamepad,
-    })
+    Some(SdlGamepad { _sdl: sdl, gamepad })
 }
 
+#[cfg(target_os = "ios")]
+pub(crate) fn init_sdl(_gamepad_index: usize) -> Option<SdlGamepad> {
+    None
+}
 
 // ============================================================
 // Debug overlay marker

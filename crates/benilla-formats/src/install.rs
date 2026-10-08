@@ -94,6 +94,35 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// On iOS, refresh the persistent addon tree from the app bundle on every launch when addons
+/// were bundled. Addons are shipped with the app, while mutable SavedVariables stay elsewhere.
+#[cfg(target_os = "ios")]
+pub fn prepare_ios_addons() {
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else { return; };
+    let Some(bundle) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) else { return; };
+    let bundled = bundle.join("Interface/AddOns");
+    if !bundled.is_dir() { return; }
+
+    let persistent_root = home.join("Library/Application Support/Benilla/benilla-config");
+    let persistent = persistent_root.join("AddOns");
+    let staging = persistent_root.join("AddOns.installing");
+
+    eprintln!("benilla: refreshing bundled AddOns...");
+    let _ = std::fs::remove_dir_all(&staging);
+    if let Err(e) = copy_dir_recursive(&bundled, &staging) {
+        eprintln!("benilla: failed to stage bundled AddOns: {e}");
+        let _ = std::fs::remove_dir_all(&staging);
+        return;
+    }
+    let _ = std::fs::remove_dir_all(&persistent);
+    if let Err(e) = std::fs::rename(&staging, &persistent) {
+        eprintln!("benilla: failed to activate bundled AddOns: {e}");
+        let _ = std::fs::remove_dir_all(&staging);
+        return;
+    }
+    eprintln!("benilla: bundled AddOns are ready.");
+}
+
 /// The vanilla `Data` directory, or `None` when there is no install. Uncached, so a `$WOW_DATA`
 /// change is seen.
 pub fn wow_data() -> Option<PathBuf> {

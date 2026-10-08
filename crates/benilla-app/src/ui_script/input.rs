@@ -101,8 +101,8 @@ pub(super) fn feed_ui_input(
     mut virtual_cursor: ResMut<crate::cursor::VirtualCursor>,
     mut virtual_mouse_buttons: ResMut<crate::cursor::VirtualMouseButtons>,
     // iOS has touch input rather than a conventional OS mouse pointer.
-    touches: MessageReader<bevy::input::touch::TouchInput>,
-    touch_id: Local<Option<u64>>,
+    mut touches: MessageReader<bevy::input::touch::TouchInput>,
+    mut touch_id: Local<Option<u64>>,
 ) {
     const GAMEPAD_MOUSE_SPEED: f32 = 700.0;
 
@@ -125,7 +125,7 @@ pub(super) fn feed_ui_input(
         payload_held.0 = false;
         return;
     };
-    let Ok((window, raw_handle)) = window.single_mut() else {
+    let Ok((mut window, raw_handle)) = window.single_mut() else {
         capture.typing = false;
         capture.arrows_fall_through = false;
         capture.consumed.clear();

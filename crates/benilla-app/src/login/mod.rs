@@ -704,7 +704,7 @@ fn login_input(
                 && interaction.is_changed()
                 && *interaction == Interaction::Pressed
             {
-                dialog.edit.focus();
+                dialog.edit.reset_blink();
                 if let Ok(mut window) = windows.single_mut() {
                     window.ime_enabled = true;
                 }
@@ -849,13 +849,6 @@ fn login_input(
     if dialog_open {
         if let Ok(mut window) = windows.single_mut() {
             window.ime_enabled = dialog.kind == Some(DialogKind::Realmlist);
-        }
-        if dialog.kind == Some(DialogKind::Realmlist) {
-            for (_entity, interaction) in &dialog_edit {
-                if interaction.is_changed() && *interaction == Interaction::Pressed {
-                    dialog.edit.reset_blink();
-                }
-            }
         }
     }
     if !dialog_open && keys.just_pressed(KeyCode::Escape) {

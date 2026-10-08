@@ -356,6 +356,7 @@ fn setup_gamepad_debug_overlay(mut commands: Commands) {
 // Poll SDL gamepad
 // ============================================================
 
+#[cfg(not(target_os = "ios"))]
 fn poll_gamepad(
     sdl_gamepad: Option<NonSend<SdlGamepad>>,
     mut state: ResMut<GamepadState>,
@@ -367,9 +368,6 @@ fn poll_gamepad(
 
     state.connected = true;
 
-    // SDL is not running its own event loop.
-    //
-    // Explicitly update the gamepad state once per frame.
     sdl_gamepad.gamepad.subsystem().update();
 
     let gamepad = &sdl_gamepad.gamepad;
@@ -383,19 +381,13 @@ fn poll_gamepad(
     state.prev_dpad_right = state.dpad_right;
     state.prev_l = state.l;
     state.prev_r = state.r;
-
     state.prev_minus = state.minus;
     state.prev_plus = state.plus;
     state.prev_l3 = state.l3;
     state.prev_r3 = state.r3;
 
-    // --------------------------------------------------------
-    // Analog sticks
-    // --------------------------------------------------------
-
     let left_x = gamepad.axis(Axis::LeftX);
     let left_y = gamepad.axis(Axis::LeftY);
-
     let right_x = gamepad.axis(Axis::RightX);
     let right_y = gamepad.axis(Axis::RightY);
 
@@ -403,73 +395,28 @@ fn poll_gamepad(
         normalize_axis(left_x),
         -normalize_axis(left_y),
     );
-
     state.look_stick = Vec2::new(
         normalize_axis(right_x),
         normalize_axis(right_y),
     );
-
-
-    // --------------------------------------------------------
-    // Face buttons
-    //
-    // SDL uses the standard gamepad layout:
-    //
-    // South = A
-    // East  = B
-    // West  = X
-    // North = Y
-    // --------------------------------------------------------
 
     state.a = gamepad.button(Button::South);
     state.b = gamepad.button(Button::East);
     state.x = gamepad.button(Button::West);
     state.y = gamepad.button(Button::North);
 
-
-    // --------------------------------------------------------
-    // Shoulder buttons
-    // --------------------------------------------------------
-
     state.l = gamepad.button(Button::LeftShoulder);
     state.r = gamepad.button(Button::RightShoulder);
 
-
-    // --------------------------------------------------------
-    // Triggers
-    //
-    // ZL / ZR are analog axes in SDL's Gamepad API.
-    // --------------------------------------------------------
-
     state.prev_zl = state.zl;
-    state.zl = normalize_trigger(
-        gamepad.axis(Axis::TriggerLeft),
-    );
-
+    state.zl = normalize_trigger(gamepad.axis(Axis::TriggerLeft));
     state.prev_zr = state.zr;
-    state.zr = normalize_trigger(
-        gamepad.axis(Axis::TriggerRight),
-    );
-
-
-    // --------------------------------------------------------
-    // System buttons
-    // --------------------------------------------------------
+    state.zr = normalize_trigger(gamepad.axis(Axis::TriggerRight));
 
     state.minus = gamepad.button(Button::Back);
     state.plus = gamepad.button(Button::Start);
-
-
-    // --------------------------------------------------------
-    // Stick buttons
-    // --------------------------------------------------------
     state.l3 = gamepad.button(Button::LeftStick);
     state.r3 = gamepad.button(Button::RightStick);
-
-
-    // --------------------------------------------------------
-    // D-pad
-    // --------------------------------------------------------
 
     state.dpad_up = gamepad.button(Button::DPadUp);
     state.dpad_down = gamepad.button(Button::DPadDown);
@@ -477,6 +424,15 @@ fn poll_gamepad(
     state.dpad_right = gamepad.button(Button::DPadRight);
 }
 
+#[cfg(target_os = "ios")]
+fn poll_gamepad(
+    _sdl_gamepad: Option<NonSend<SdlGamepad>>,
+    mut state: ResMut<GamepadState>,
+) {
+    state.connected = false;
+    state.move_stick = Vec2::ZERO;
+    state.look_stick = Vec2::ZERO;
+}
 fn gamepad_rt_interact(
     gamepad: Res<GamepadState>,
     selection: Res<crate::target::Selection>,

@@ -52,15 +52,18 @@ mkdir -p "$APP"
 cp "$BINARY" "$APP/benilla"
 cp "$ROOT/ios/Info.plist" "$APP/Info.plist"
 
-if [[ ! -d "$DATA_SOURCE" ]]; then
-    echo "error: WoW Data directory not found: $DATA_SOURCE" >&2
-    echo "Set WOW_DATA=/path/to/your/1.12.1/Data or provide $ROOT/WoW/Data." >&2
-    exit 1
+if [[ "${IOS_BUNDLE_DATA:-0}" == "1" ]]; then
+    if [[ ! -d "$DATA_SOURCE" ]]; then
+        echo "error: WoW Data directory not found: $DATA_SOURCE" >&2
+        echo "Set WOW_DATA=/path/to/your/1.12.1/Data or provide $ROOT/WoW/Data." >&2
+        exit 1
+    fi
+    echo "==> Bundling WoW Data for first-install bootstrap from: $DATA_SOURCE"
+    mkdir -p "$APP/Data"
+    rsync -a "$DATA_SOURCE/" "$APP/Data/"
+else
+    echo "==> Skipping WoW Data bundle (persistent iOS app container is used)"
 fi
-
-echo "==> Bundling WoW Data from: $DATA_SOURCE"
-mkdir -p "$APP/Data"
-rsync -a "$DATA_SOURCE/" "$APP/Data/"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $BUNDLE_ID" "$APP/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(git rev-list --count HEAD)" "$APP/Info.plist"
 

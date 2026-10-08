@@ -36,11 +36,11 @@ static int os_pushresult (lua_State *L, int i, const char *filename) {
 
 
 static int os_execute (lua_State *L) {
-#if !defined(__wasi__)
+#if defined(__wasi__) || defined(LUA_USE_IOS)
+  luaL_error(L, "not supported on iOS");
+#else
   lua_pushinteger(L, system(luaL_optstring(L, 1, NULL)));
   return 1;
-#else
-  luaL_error(L, "not supported on WASI");
 #endif
 }
 

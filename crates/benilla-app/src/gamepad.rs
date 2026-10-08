@@ -270,16 +270,7 @@ pub(crate) fn init_sdl(_gamepad_index: usize) -> Option<SdlGamepad> {
 struct GamepadDebugText;
 
 fn gamepad_debug_enabled() -> bool {
-    #[cfg(target_os = "ios")]
-    {
-        // Temporarily always visible on iOS while the native controller backend is being brought up.
-        true
-    }
-
-    #[cfg(not(target_os = "ios"))]
-    {
-        std::env::var("BENILLA_GAMEPAD_DEBUG").as_deref() == Ok("1")
-    }
+    std::env::var("BENILLA_GAMEPAD_DEBUG").as_deref() == Ok("1")
 }
 
 

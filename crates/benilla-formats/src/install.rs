@@ -75,7 +75,7 @@ fn candidates_from(
     project: Option<&Path>,
     exe_dir: Option<PathBuf>,
 ) -> Vec<PathBuf> {
-    let mut out = Vec::with_capacity(4);
+    let mut out = Vec::with_capacity(5);
 
     // 1. The override; set and empty is no install at all, even in a dev build
     // (`WOW_DATA= cargo play` runs as a player without data).
@@ -84,6 +84,11 @@ fn candidates_from(
             return Vec::new();
         }
         out.push(over);
+    }
+
+    #[cfg(target_os = "ios")]
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        out.push(home.join("Library/Application Support/Benilla/Data"));
     }
 
     // 2. The project folder, dev builds only.

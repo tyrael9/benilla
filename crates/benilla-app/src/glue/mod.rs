@@ -93,6 +93,12 @@ pub(crate) fn glue_clicks(
     });
     for (e, interaction) in &interactions {
         if *interaction == Interaction::Pressed {
+            #[cfg(target_os = "ios")]
+            if !pushed.contains(e) {
+                // iOS touch release does not reliably produce Bevy's Hovered transition.
+                // Treat the initial touch-down as the glue click on iOS.
+                clicks.0.insert(e);
+            }
             pushed.insert(e);
         }
     }

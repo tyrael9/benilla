@@ -270,7 +270,16 @@ pub(crate) fn init_sdl(_gamepad_index: usize) -> Option<SdlGamepad> {
 struct GamepadDebugText;
 
 fn gamepad_debug_enabled() -> bool {
-    std::env::var("BENILLA_GAMEPAD_DEBUG").as_deref() == Ok("1")
+    #[cfg(target_os = "ios")]
+    {
+        // Temporarily always visible on iOS while the native controller backend is being brought up.
+        true
+    }
+
+    #[cfg(not(target_os = "ios"))]
+    {
+        std::env::var("BENILLA_GAMEPAD_DEBUG").as_deref() == Ok("1")
+    }
 }
 
 
@@ -429,9 +438,79 @@ fn poll_gamepad(
     _sdl_gamepad: Option<NonSend<SdlGamepad>>,
     mut state: ResMut<GamepadState>,
 ) {
-    state.connected = false;
-    state.move_stick = Vec2::ZERO;
-    state.look_stick = Vec2::ZERO;
+    use objc2_game_controller::GCController;
+
+    let Some(controller) = (unsafe { GCController::current() }) else {
+        state.connected = false;
+        state.move_stick = Vec2::ZERO;
+        state.look_stick = Vec2::ZERO;
+        return;
+    };
+
+    let Some(gamepad) = (unsafe { controller.extendedGamepad() }) else {
+        state.connected = false;
+        state.move_stick = Vec2::ZERO;
+        state.look_stick = Vec2::ZERO;
+        return;
+    };
+
+    state.connected = true;
+
+    state.prev_a = state.a;
+    state.prev_b = state.b;
+    state.prev_x = state.x;
+    state.prev_y = state.y;
+    state.prev_dpad_up = state.dpad_up;
+    state.prev_dpad_down = state.dpad_down;
+    state.prev_dpad_left = state.dpad_left;
+    state.prev_dpad_right = state.dpad_right;
+    state.prev_l = state.l;
+    state.prev_r = state.r;
+    state.prev_minus = state.minus;
+    state.prev_plus = state.plus;
+    state.prev_l3 = state.l3;
+    state.prev_r3 = state.r3;
+
+    unsafe {
+        let left = gamepad.leftThumbstick();
+        let right = gamepad.rightThumbstick();
+        let dpad = gamepad.dpad();
+
+        // GameController already returns normalized, deadzoned axis values.
+        // Match the existing SDL convention: +Y means forward/up.
+        state.move_stick = Vec2::new(left.xAxis().value(), -left.yAxis().value());
+        state.look_stick = Vec2::new(right.xAxis().value(), right.yAxis().value());
+
+        state.a = gamepad.buttonA().isPressed();
+        state.b = gamepad.buttonB().isPressed();
+        state.x = gamepad.buttonX().isPressed();
+        state.y = gamepad.buttonY().isPressed();
+
+        state.l = gamepad.leftShoulder().isPressed();
+        state.r = gamepad.rightShoulder().isPressed();
+
+        state.prev_zl = state.zl;
+        state.prev_zr = state.zr;
+        state.zl = gamepad.leftTrigger().value();
+        state.zr = gamepad.rightTrigger().value();
+
+        // Apple has Menu/Options rather than SDL's Back/Start pair.
+        // Menu is the natural WoW "minus/back" equivalent; Options is "plus/map".
+        state.minus = gamepad.buttonMenu().isPressed();
+        state.plus = gamepad.buttonOptions().is_some_and(|button| button.isPressed());
+
+        state.l3 = gamepad
+            .leftThumbstickButton()
+            .is_some_and(|button| button.isPressed());
+        state.r3 = gamepad
+            .rightThumbstickButton()
+            .is_some_and(|button| button.isPressed());
+
+        state.dpad_up = dpad.up().isPressed();
+        state.dpad_down = dpad.down().isPressed();
+        state.dpad_left = dpad.left().isPressed();
+        state.dpad_right = dpad.right().isPressed();
+    }
 }
 fn gamepad_rt_interact(
     gamepad: Res<GamepadState>,

@@ -57,11 +57,12 @@ if [[ -z "$PROFILE_PATH" ]]; then
         } | sort -u
     )"
 
+    TMPDIR_PROFILE_CHECK="$(mktemp -d)"
+    trap 'rm -rf "$TMPDIR_SIGN" "$TMPDIR_PROFILE_CHECK"' EXIT
     while IFS= read -r p; do
         [[ -z "$p" ]] && continue
         TEST_PLIST="$TMPDIR_PROFILE_CHECK/profile.plist"
-        rm -rf "$TMPDIR_PROFILE_CHECK"
-        mkdir -p "$TMPDIR_PROFILE_CHECK"
+        rm -f "$TEST_PLIST"
         if /usr/bin/security cms -D -i "$p" -o "$TEST_PLIST" 2>/dev/null; then
             TEST_APP_ID="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$TEST_PLIST" 2>/dev/null || true)"
             TEST_BUNDLE_ID="${TEST_APP_ID#*.}"

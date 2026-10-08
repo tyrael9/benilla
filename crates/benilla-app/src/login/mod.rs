@@ -826,7 +826,7 @@ fn login_input(
         }
         if dialog.kind == Some(DialogKind::Realmlist) {
             for (_entity, interaction) in &dialog_edit {
-                if interaction.is_changed() && **interaction == Interaction::Pressed {
+                if interaction.is_changed() && *interaction == Interaction::Pressed {
                     dialog.edit.reset_blink();
                 }
             }

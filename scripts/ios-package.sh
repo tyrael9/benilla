@@ -11,6 +11,35 @@ BINARY="$ROOT/target/$TARGET/$PROFILE/benilla"
 BUNDLE_ID="${IOS_BUNDLE_ID:-com.tyrael9.benilla}"
 DEVICE_UDID="${IOS_DEVICE_UDID:-}"
 DATA_SOURCE="${WOW_DATA:-$ROOT/WoW/Data}"
+INSTALL_ONLY=0
+if [[ "${1:-}" == "--install-only" ]]; then
+    INSTALL_ONLY=1
+    shift
+fi
+if [[ "$#" -ne 0 ]]; then
+    echo "usage: $0 [--install-only]" >&2
+    exit 64
+fi
+
+if [[ "$INSTALL_ONLY" == "1" ]]; then
+    if [[ ! -d "$APP" || ! -x "$APP/benilla" ]]; then
+        echo "error: packaged app not found: $APP" >&2
+        echo "Run $0 first, or omit --install-only." >&2
+        exit 1
+    fi
+    if [[ -z "$DEVICE_UDID" ]]; then
+        DEVICE_UDID="$(xcrun devicectl list devices 2>/dev/null | awk '/connected/ {print $3; exit}' || true)"
+    fi
+    if [[ -z "$DEVICE_UDID" ]]; then
+        echo "error: no connected iPhone found." >&2
+        exit 6
+    fi
+    echo "==> Installing existing app on $DEVICE_UDID..."
+    xcrun devicectl device install app --device "$DEVICE_UDID" "$APP"
+    echo
+    echo "==> Done: $APP"
+    exit 0
+fi
 
 echo "==> Building Benilla for iPhone..."
 cargo build -p benilla --profile "$PROFILE" --target "$TARGET"

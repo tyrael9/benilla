@@ -72,6 +72,7 @@ rand = "0.8"
 sdl3 = { version = "0.16.0", features = ["build-from-source"] }
 
 [target.'cfg(target_os = "ios")'.dependencies]
+objc2 = "0.5"
 objc2-game-controller = { version = "0.3.2", default-features = false, features = [
     "GCController",
     "GCExtendedGamepad",

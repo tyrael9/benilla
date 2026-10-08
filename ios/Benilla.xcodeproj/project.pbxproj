@@ -67,6 +67,7 @@
         productName = Benilla;
         productReference = A00000000000000000000001 /* Benilla.app */;
         productType = "com.apple.product-type.application";
+        platform = iphoneos;
     };
 /* End PBXNativeTarget section */
 
@@ -137,6 +138,8 @@
         isa = XCBuildConfiguration;
         buildSettings = {
             ALWAYS_SEARCH_USER_PATHS = NO;
+            SDKROOT = iphoneos;
+            SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
             CLANG_ENABLE_MODULES = YES;
             CODE_SIGN_STYLE = Automatic;
             DEVELOPMENT_TEAM = BQ4ZCKKTRQ;
@@ -145,6 +148,8 @@
             PRODUCT_BUNDLE_IDENTIFIER = com.tyrael9.benilla;
             PRODUCT_NAME = Benilla;
             TARGETED_DEVICE_FAMILY = "1,2";
+            SDKROOT = iphoneos;
+            SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
             EXECUTABLE_NAME = benilla;
             SWIFT_VERSION = 5.0;
         };

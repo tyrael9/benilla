@@ -62,7 +62,7 @@ impl Default for Realmlist {
                 pinned_by_env: true,
             },
             _ => Realmlist {
-                address: DEFAULT_REALMLIST.to_string(),
+                address: saved_ios_realmlist().unwrap_or_else(|| DEFAULT_REALMLIST.to_string()),
                 pinned_by_env: false,
             },
         }
@@ -93,6 +93,31 @@ impl Realmlist {
             return;
         }
         self.address = address.to_string();
+    }
+}
+
+/// The iOS app container survives replacement of the signed .app, so keep the user's manually
+/// entered realm in Application Support rather than inside the bundle.
+#[cfg(target_os = "ios")]
+fn saved_ios_realmlist() -> Option<String> {
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from)?;
+    let path = home.join("Library/Application Support/Benilla/realmlist");
+    let value = std::fs::read_to_string(path).ok()?;
+    normalize(&value)
+}
+
+/// Persist a manually entered realm for the next launch. $WOW_HOST remains session-only.
+#[cfg(target_os = "ios")]
+pub(crate) fn save_ios_realmlist(address: &str) {
+    let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) else {
+        return;
+    };
+    let dir = home.join("Library/Application Support/Benilla");
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    if let Err(e) = std::fs::write(dir.join("realmlist"), address) {
+        warn!("realmlist: failed to persist iOS realm {address}: {e}");
     }
 }
 

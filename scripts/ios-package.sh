@@ -41,15 +41,41 @@ if [[ -z "$IDENTITY" ]]; then
 fi
 
 PROFILE_PATH="${IOS_PROVISIONING_PROFILE:-}"
+if [[ -n "$PROFILE_PATH" && ! -f "$PROFILE_PATH" ]]; then
+    echo "error: provisioning profile not found: $PROFILE_PATH" >&2
+    exit 3
+fi
+
+# Automatic signing profiles created by Xcode are often kept inside DerivedData
+# rather than ~/Library/MobileDevice/Provisioning Profiles. Search both places
+# and select a profile whose application-identifier matches this bundle ID.
 if [[ -z "$PROFILE_PATH" ]]; then
-    PROFILE_PATH="$(find "$HOME/Library/MobileDevice/Provisioning Profiles" \
-        -type f -name '*.mobileprovision' -print 2>/dev/null | \
-        while IFS= read -r p; do stat -f '%m %N' "$p"; done | \
-        sort -nr | cut -d' ' -f2- | head -1 || true)"
+    PROFILE_CANDIDATES="$(
+        {
+            find "$HOME/Library/MobileDevice/Provisioning Profiles" -type f -name '*.mobileprovision' -print 2>/dev/null || true
+            find "$HOME/Library/Developer/Xcode/DerivedData" -type f -name 'embedded.mobileprovision' -print 2>/dev/null || true
+        } | sort -u
+    )"
+
+    while IFS= read -r p; do
+        [[ -z "$p" ]] && continue
+        TEST_PLIST="$TMPDIR_PROFILE_CHECK/profile.plist"
+        rm -rf "$TMPDIR_PROFILE_CHECK"
+        mkdir -p "$TMPDIR_PROFILE_CHECK"
+        if /usr/bin/security cms -D -i "$p" -o "$TEST_PLIST" 2>/dev/null; then
+            TEST_APP_ID="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$TEST_PLIST" 2>/dev/null || true)"
+            TEST_BUNDLE_ID="${TEST_APP_ID#*.}"
+            if [[ "$TEST_BUNDLE_ID" == "$BUNDLE_ID" || "$TEST_BUNDLE_ID" == "*" ]]; then
+                PROFILE_PATH="$p"
+                break
+            fi
+        fi
+    done <<< "$PROFILE_CANDIDATES"
 fi
 
 if [[ -z "$PROFILE_PATH" || ! -f "$PROFILE_PATH" ]]; then
-    echo "error: no provisioning profile found." >&2
+    echo "error: no provisioning profile matching $BUNDLE_ID found." >&2
+    echo "If Xcode generated one, it may be embedded in DerivedData; otherwise pass IOS_PROVISIONING_PROFILE=..." >&2
     exit 3
 fi
 

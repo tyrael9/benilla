@@ -332,11 +332,11 @@ fn update_ios_diagnostics(
         return;
     };
 
-    let logical_w = window.resolution.logical_width();
-    let logical_h = window.resolution.logical_height();
     let physical_w = window.resolution.physical_width();
     let physical_h = window.resolution.physical_height();
     let scale = window.resolution.scale_factor();
+    let logical_w = physical_w as f32 / scale;
+    let logical_h = physical_h as f32 / scale;
 
     *text = Text::new(format!(
         "FPS {:>5.1}   WINDOW {:>5.0}x{:>5.0}   PHYSICAL {:>4}x{:>4}   SCALE {:.2}",
@@ -363,11 +363,6 @@ impl Plugin for GamepadPlugin {
                 Startup,
                 setup_gamepad_debug_overlay.run_if(gamepad_debug_enabled),
             )
-
-        #[cfg(target_os = "ios")]
-        app.init_resource::<IosDiagnosticsFps>()
-            .add_systems(Startup, setup_ios_diagnostics)
-            .add_systems(Update, update_ios_diagnostics);
             .add_systems(
                 Update,
                 poll_gamepad.before(crate::bindings::BindingSet),
@@ -390,12 +385,16 @@ impl Plugin for GamepadPlugin {
             )
             .add_systems(Update, gamepad_rt_interact)
             .add_systems(
-                Update, 
+                Update,
                 update_gamepad_debug_overlay.run_if(gamepad_debug_enabled),
             );
+
+        #[cfg(target_os = "ios")]
+        app.init_resource::<IosDiagnosticsFps>()
+            .add_systems(Startup, setup_ios_diagnostics)
+            .add_systems(Update, update_ios_diagnostics);
     }
 }
-
 
 // ============================================================
 // Debug overlay

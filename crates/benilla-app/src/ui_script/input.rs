@@ -460,6 +460,20 @@ pub(super) fn feed_ui_input(
         if ev.state != ButtonState::Pressed {
             continue;
         }
+
+        // Some iOS software-keyboard layouts deliver the Return action as a newline text
+        // event instead of a physical Enter key code. Route that through the same FrameXML
+        // key path as Enter so ChatFrameEditBox.OnEnterPressed can send the message, and never
+        // insert the newline into the single-line edit box.
+        #[cfg(target_os = "ios")]
+        if !matches!(ev.key_code, KeyCode::Enter | KeyCode::NumpadEnter)
+            && ev.text.as_deref().is_some_and(|text| matches!(text, "\n" | "\r" | "\r\n"))
+        {
+            script.key_input("ENTER");
+            capture.consumed.push(ev.key_code);
+            continue;
+        }
+
         let named = match ev.key_code {
             KeyCode::Enter | KeyCode::NumpadEnter => Some("ENTER"),
             KeyCode::Escape => Some("ESCAPE"),

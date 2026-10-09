@@ -214,13 +214,6 @@ local function CreateMobileButton(index)
             return
         end
 
-        if CursorHasSpell()
-            or CursorHasItem()
-            or CursorHasAction() then
-            UseAction(action, 1, 0)
-            return
-        end
-
         if arg1 == "RightButton" then
             UseAction(action, 0, 1)
         else

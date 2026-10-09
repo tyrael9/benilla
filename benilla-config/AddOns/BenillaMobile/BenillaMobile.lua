@@ -7,7 +7,9 @@ local GRID_COLUMNS = 6
 local GRID_ROWS = 2
 local MAX_ACTION_SLOTS = 120
 local UPDATE_INTERVAL = 0.12
-local DEFAULT_BUTTON_SIZE = 52
+local DEFAULT_BUTTON_SIZE = 68
+local PREVIOUS_DEFAULT_BUTTON_SIZE = 52
+local MAX_BUTTON_SIZE = 96
 local BUTTON_SPACING = 6
 local HEADER_HEIGHT = 26
 local DEFAULT_X = 0
@@ -36,6 +38,15 @@ local function InitializeSettings()
     if type(BenillaMobileDB.buttonSize) ~= "number" then
         BenillaMobileDB.buttonSize = DEFAULT_BUTTON_SIZE
     end
+
+    -- Move existing installs from the original 52-point default to the larger mobile default,
+    -- but preserve a size the player already chose explicitly.
+    if BenillaMobileDB.version ~= 2 then
+        if BenillaMobileDB.buttonSize == PREVIOUS_DEFAULT_BUTTON_SIZE then
+            BenillaMobileDB.buttonSize = DEFAULT_BUTTON_SIZE
+        end
+        BenillaMobileDB.version = 2
+    end
     if BenillaMobileDB.visibility ~= "show"
         and BenillaMobileDB.visibility ~= "hide"
         and BenillaMobileDB.visibility ~= "auto" then
@@ -46,7 +57,7 @@ local function InitializeSettings()
     end
 
     BenillaMobileDB.buttonSize =
-        math.max(40, math.min(72, BenillaMobileDB.buttonSize))
+        math.max(40, math.min(MAX_BUTTON_SIZE, BenillaMobileDB.buttonSize))
 end
 
 InitializeSettings()
@@ -514,7 +525,9 @@ end
 
 SLASH_BENILLAMOBILE1 = "/bm"
 SlashCmdList["BENILLAMOBILE"] = function(message)
-    local command, value = string.match(message or "", "^(%S+)%s*(.-)%s*$")
+    -- Vanilla's Lua dialect has string.find, but not Lua 5.1's string.match.
+    local _, _, command, value =
+        string.find(message or "", "^%s*(%S+)%s*(.-)%s*$")
     command = string.lower(command or "")
     value = value or ""
 
@@ -543,7 +556,8 @@ SlashCmdList["BENILLAMOBILE"] = function(message)
     elseif command == "size" then
         local size = tonumber(value)
         if size then
-            BenillaMobileDB.buttonSize = math.max(40, math.min(72, size))
+            BenillaMobileDB.buttonSize =
+                math.max(40, math.min(MAX_BUTTON_SIZE, size))
             ResizeButtons()
             PositionBar()
         end
@@ -566,7 +580,7 @@ SlashCmdList["BENILLAMOBILE"] = function(message)
         DEFAULT_CHAT_FRAME:AddMessage(
             "BenillaMobile: /bm next | prev | page <1-" ..
             tostring(PAGE_COUNT) ..
-            "> | show | hide | auto | left/right/up/down | size <40-72> | gamepad on/off | reset"
+            "> | show | hide | auto | left/right/up/down | size <40-96> | gamepad on/off | reset"
         )
     end
 end

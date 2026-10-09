@@ -149,6 +149,42 @@ pub(super) fn feed_ui_input(
 
     let gamepad_mouse = gamepad.zl > 0.5;
 
+    // iOS may also surface a touch as a mouse cursor/button event. Prefer the explicit touch
+    // bridge for every frame containing a touch, and while that finger remains down, otherwise
+    // one tap can be delivered twice (or its synthetic mouse release can leave a press held).
+    #[cfg(target_os = "ios")]
+    let mut ios_touch_event_this_frame = false;
+    #[cfg(target_os = "ios")]
+    if !gamepad_mouse {
+        use bevy::input::touch::TouchPhase;
+        for touch in touches.read() {
+            let s = super::seam_scale(window.height(), ui_scale.0);
+            let (x, y) = (touch.position.x / s, (window.height() - touch.position.y) / s);
+            match touch.phase {
+                TouchPhase::Started if touch_id.is_none() => {
+                    *touch_id = Some(touch.id);
+                    ios_touch_event_this_frame = true;
+                    hover.0 = script.mouse_move(x, y)
+                        .filter(|id| !script.is_world_frame(*id));
+                    script.mouse_button(x, y, "LeftButton", true);
+                }
+                TouchPhase::Moved if *touch_id == Some(touch.id) => {
+                    ios_touch_event_this_frame = true;
+                    hover.0 = script.mouse_move(x, y)
+                        .filter(|id| !script.is_world_frame(*id));
+                }
+                TouchPhase::Ended | TouchPhase::Canceled if *touch_id == Some(touch.id) => {
+                    ios_touch_event_this_frame = true;
+                    hover.0 = script.mouse_move(x, y)
+                        .filter(|id| !script.is_world_frame(*id));
+                    script.mouse_button(x, y, "LeftButton", false);
+                    *touch_id = None;
+                }
+                _ => {}
+            }
+        }
+    }
+
     // ── Virtual mouse → Bevy mouse buttons ─────────────────────────────────────
     //
     // While LT is held, A/B are the mouse buttons for this Benilla instance.
@@ -297,6 +333,12 @@ pub(super) fn feed_ui_input(
             .cursor_position()
             .or_else(crate::target::hover_probe_point)
             .filter(|_| !synthetic)
+            .filter(|_| {
+                #[cfg(target_os = "ios")]
+                { !ios_touch_event_this_frame && touch_id.is_none() }
+                #[cfg(not(target_os = "ios"))]
+                { true }
+            })
         {
             let s = super::seam_scale(window.height(), ui_scale.0);
             let (x, y) = (
@@ -378,38 +420,6 @@ pub(super) fn feed_ui_input(
             }
 
             script.pointer_left_window();
-        }
-    }
-
-    // ── iOS touch → WoW UI pointer ────────────────────────────────────────────────────────────
-    // Winit exposes touchscreen contacts as TouchInput, not CursorMoved/MouseButtonInput. The
-    // login screen has Bevy UI interactions, but the in-world WoW UI is driven by UiScript's
-    // mouse_move/mouse_button calls, so bridge a single finger here.
-    #[cfg(target_os = "ios")]
-    if !gamepad_mouse {
-        use bevy::input::touch::TouchPhase;
-        for touch in touches.read() {
-            let s = super::seam_scale(window.height(), ui_scale.0);
-            let (x, y) = (touch.position.x / s, (window.height() - touch.position.y) / s);
-            match touch.phase {
-                TouchPhase::Started if touch_id.is_none() => {
-                    *touch_id = Some(touch.id);
-                    hover.0 = script.mouse_move(x, y)
-                        .filter(|id| !script.is_world_frame(*id));
-                    script.mouse_button(x, y, "LeftButton", true);
-                }
-                TouchPhase::Moved if *touch_id == Some(touch.id) => {
-                    hover.0 = script.mouse_move(x, y)
-                        .filter(|id| !script.is_world_frame(*id));
-                }
-                TouchPhase::Ended | TouchPhase::Canceled if *touch_id == Some(touch.id) => {
-                    hover.0 = script.mouse_move(x, y)
-                        .filter(|id| !script.is_world_frame(*id));
-                    script.mouse_button(x, y, "LeftButton", false);
-                    *touch_id = None;
-                }
-                _ => {}
-            }
         }
     }
 

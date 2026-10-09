@@ -56,10 +56,17 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 "LeftY" => model.gamepad.left_y,
                 "RightX" => model.gamepad.right_x,
                 "RightY" => model.gamepad.right_y,
+                "TouchMoveX" => model.gamepad.touch_move_x,
+                "TouchMoveY" => model.gamepad.touch_move_y,
 
                 _ => 0.0,
             })
         })?,
+    )?;
+
+    g.set(
+        "Gamepad_IsTouchDevice",
+        lua.create_function(|_lua, ()| Ok(cfg!(target_os = "ios")))?,
     )?;
 
     Ok(())

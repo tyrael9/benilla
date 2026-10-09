@@ -39,6 +39,10 @@ pub(crate) struct GamepadState {
     pub move_stick: Vec2,
     pub look_stick: Vec2,
 
+    /// A touch-owned virtual stick can steer independently of the UI pointer.
+    pub touch_move_stick: Vec2,
+    pub touch_move_active: bool,
+
     // Face buttons
     pub a: bool,
     pub b: bool,
@@ -98,7 +102,13 @@ pub(crate) struct GamepadState {
 
 impl GamepadState {
     pub(crate) fn move_axis(&self) -> Vec2 {
-        apply_deadzone(self.move_stick, 0.15)
+        // A touch stick owns movement while its finger is captured, even when centered.
+        // Otherwise keep the physical controller path byte-for-byte equivalent.
+        if self.touch_move_active {
+            apply_deadzone(self.touch_move_stick, 0.15)
+        } else {
+            apply_deadzone(self.move_stick, 0.15)
+        }
     }
 
     pub(crate) fn look_axis(&self) -> Vec2 {
@@ -189,6 +199,8 @@ impl GamepadState {
             left_y: self.move_stick.y,
             right_x: self.look_stick.x,
             right_y: self.look_stick.y,
+            touch_move_x: self.touch_move_stick.x,
+            touch_move_y: self.touch_move_stick.y,
         }
     }
 }
@@ -861,4 +873,29 @@ fn apply_deadzone(v: Vec2, deadzone: f32) -> Vec2 {
         .clamp(0.0, 1.0);
 
     normalized * magnitude
+}
+
+#[cfg(test)]
+mod touch_move_axis_tests {
+    use super::*;
+
+    #[test]
+    fn captured_touch_stick_owns_movement_then_releases_to_controller() {
+        let mut state = GamepadState {
+            move_stick: Vec2::X,
+            touch_move_stick: Vec2::Y,
+            touch_move_active: true,
+            ..default()
+        };
+
+        assert_eq!(state.move_axis(), apply_deadzone(Vec2::Y, 0.15));
+
+        // A centered finger still owns the axis; do not fall back to a held controller stick.
+        state.touch_move_stick = Vec2::ZERO;
+        assert_eq!(state.move_axis(), Vec2::ZERO);
+
+        // Releasing the finger restores the normal physical stick path.
+        state.touch_move_active = false;
+        assert_eq!(state.move_axis(), apply_deadzone(Vec2::X, 0.15));
+    }
 }

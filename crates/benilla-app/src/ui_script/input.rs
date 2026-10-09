@@ -13,6 +13,19 @@ use super::{CursorPayloadHeld, PlayerUiClickConsumed, PlayerUiHover, UiKeyboardC
 use crate::bindings::WheelNotches;
 use crate::textinput::{self, keymap, HostClipboard};
 
+#[cfg(any(target_os = "ios", test))]
+fn touch_stick_contains(x: f32, y: f32) -> bool {
+    let dx = x - 107.0;
+    let dy = y - 114.0;
+    dx * dx + dy * dy <= 72.0 * 72.0
+}
+
+#[cfg(any(target_os = "ios", test))]
+fn touch_stick_axes(x: f32, y: f32) -> Vec2 {
+    Vec2::new((x - 107.0) / 72.0, (y - 114.0) / 72.0)
+        .clamp_length_max(1.0)
+}
+
 /// The pointer-side state [`feed_ui_input`] reads and writes. The world pick reads last frame's
 /// hover and occlusion ray, since the target chain runs after this pass; one frame of staleness is
 /// within the pick's tolerance.
@@ -102,7 +115,10 @@ pub(super) fn feed_ui_input(
     mut virtual_mouse_buttons: ResMut<crate::cursor::VirtualMouseButtons>,
     // iOS has touch input rather than a conventional OS mouse pointer.
     mut touches: MessageReader<bevy::input::touch::TouchInput>,
-    mut touch_id: Local<Option<u64>>,
+    // One touch is routed through WoW's single-pointer UI model; a separate finger can own
+    // the virtual movement stick without moving that UI pointer.
+    mut touch_ui_id: Local<Option<u64>>,
+    mut touch_move_id: Local<Option<u64>>,
 ) {
     const GAMEPAD_MOUSE_SPEED: f32 = 700.0;
 
@@ -149,36 +165,69 @@ pub(super) fn feed_ui_input(
 
     let gamepad_mouse = gamepad.zl > 0.5;
 
-    // iOS may also surface a touch as a mouse cursor/button event. Prefer the explicit touch
-    // bridge for every frame containing a touch, and while that finger remains down, otherwise
-    // one tap can be delivered twice (or its synthetic mouse release can leave a press held).
+    // iOS touches have independent ownership: one finger may drive movement while another
+    // taps a WoW UI control. Only the UI-owned finger is translated into the client's single
+    // mouse pointer; the movement finger never relocates that pointer or synthesizes a click.
     #[cfg(target_os = "ios")]
     let mut ios_touch_event_this_frame = false;
     #[cfg(target_os = "ios")]
-    if !gamepad_mouse {
+    {
         use bevy::input::touch::TouchPhase;
         for touch in touches.read() {
             let s = super::seam_scale(window.height(), ui_scale.0);
             let (x, y) = (touch.position.x / s, (window.height() - touch.position.y) / s);
+
+            // Match the addon visual: 144 UI units at bottom-left (35, 42), radius 72.
+            // Keep UI hit targets higher priority in the normal single-pointer route.
+            let in_move_stick = touch_stick_contains(x, y);
+            let can_route_ui = !gamepad_mouse && touch_ui_id.is_none();
+            let hit = if can_route_ui {
+                script.mouse_move(x, y)
+                    .filter(|id| !script.is_world_frame(*id))
+            } else {
+                None
+            };
+
             match touch.phase {
-                TouchPhase::Started if touch_id.is_none() => {
-                    *touch_id = Some(touch.id);
+                TouchPhase::Started => {
+                    ios_touch_event_this_frame = true;
+
+                    if hit.is_none() && in_move_stick && touch_move_id.is_none() {
+                        *touch_move_id = Some(touch.id);
+                        gamepad.touch_move_active = true;
+                        gamepad.touch_move_stick = touch_stick_axes(x, y);
+                        hover.0 = None;
+                    } else if can_route_ui {
+                        *touch_ui_id = Some(touch.id);
+                        hover.0 = hit;
+                        script.mouse_button(x, y, "LeftButton", true);
+                    }
+                }
+                TouchPhase::Moved if *touch_move_id == Some(touch.id) => {
+                    ios_touch_event_this_frame = true;
+                    gamepad.touch_move_stick = touch_stick_axes(x, y);
+                }
+                TouchPhase::Moved if *touch_ui_id == Some(touch.id) => {
                     ios_touch_event_this_frame = true;
                     hover.0 = script.mouse_move(x, y)
                         .filter(|id| !script.is_world_frame(*id));
-                    script.mouse_button(x, y, "LeftButton", true);
                 }
-                TouchPhase::Moved if *touch_id == Some(touch.id) => {
+                TouchPhase::Ended | TouchPhase::Canceled
+                    if *touch_move_id == Some(touch.id) =>
+                {
                     ios_touch_event_this_frame = true;
-                    hover.0 = script.mouse_move(x, y)
-                        .filter(|id| !script.is_world_frame(*id));
+                    gamepad.touch_move_stick = Vec2::ZERO;
+                    gamepad.touch_move_active = false;
+                    *touch_move_id = None;
                 }
-                TouchPhase::Ended | TouchPhase::Canceled if *touch_id == Some(touch.id) => {
+                TouchPhase::Ended | TouchPhase::Canceled
+                    if *touch_ui_id == Some(touch.id) =>
+                {
                     ios_touch_event_this_frame = true;
                     hover.0 = script.mouse_move(x, y)
                         .filter(|id| !script.is_world_frame(*id));
                     script.mouse_button(x, y, "LeftButton", false);
-                    *touch_id = None;
+                    *touch_ui_id = None;
                 }
                 _ => {}
             }
@@ -335,7 +384,11 @@ pub(super) fn feed_ui_input(
             .filter(|_| !synthetic)
             .filter(|_| {
                 #[cfg(target_os = "ios")]
-                { !ios_touch_event_this_frame && touch_id.is_none() }
+                {
+                    !ios_touch_event_this_frame
+                        && touch_ui_id.is_none()
+                        && touch_move_id.is_none()
+                }
                 #[cfg(not(target_os = "ios"))]
                 { true }
             })
@@ -416,7 +469,7 @@ pub(super) fn feed_ui_input(
             );
         } else if !synthetic && {
             #[cfg(target_os = "ios")]
-            { touch_id.is_none() }
+            { touch_ui_id.is_none() && touch_move_id.is_none() }
             #[cfg(not(target_os = "ios"))]
             { true }
         } {
@@ -584,6 +637,22 @@ pub(super) fn feed_ui_input(
 
     for err in script.take_errors() {
         warn!("ui_script(input): {err}");
+    }
+}
+
+#[cfg(test)]
+mod touch_stick_tests {
+    use super::*;
+
+    #[test]
+    fn touch_stick_center_and_cardinal_axes_are_consistent_with_the_overlay() {
+        assert!(touch_stick_contains(107.0, 114.0));
+        assert_eq!(touch_stick_axes(107.0, 114.0), Vec2::ZERO);
+        assert_eq!(touch_stick_axes(107.0, 186.0), Vec2::Y);
+        assert_eq!(touch_stick_axes(179.0, 114.0), Vec2::X);
+
+        let diagonal = touch_stick_axes(200.0, 200.0);
+        assert!(diagonal.length() <= 1.00001);
     }
 }
 

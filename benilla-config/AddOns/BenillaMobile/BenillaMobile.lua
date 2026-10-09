@@ -7,6 +7,10 @@ local GRID_COLUMNS = 6
 local GRID_ROWS = 2
 local MAX_ACTION_SLOTS = 120
 local UPDATE_INTERVAL = 0.12
+-- The stock ActionButtonTemplate and its cooldown model are authored at 36 UI units.
+-- Scale the whole control from this base so its fixed-size border textures and model mask
+-- grow with the icon, instead of only enlarging the parent frame.
+local BASE_BUTTON_SIZE = 36
 local DEFAULT_BUTTON_SIZE = 68
 local PREVIOUS_DEFAULT_BUTTON_SIZE = 52
 local MAX_BUTTON_SIZE = 96
@@ -197,8 +201,9 @@ local function CreateMobileButton(index)
     local column = (index - 1) - math.floor((index - 1) / GRID_COLUMNS) * GRID_COLUMNS
     local row = math.floor((index - 1) / GRID_COLUMNS)
 
-    button:SetWidth(ButtonSize())
-    button:SetHeight(ButtonSize())
+    button:SetWidth(BASE_BUTTON_SIZE)
+    button:SetHeight(BASE_BUTTON_SIZE)
+    button:SetScale(ButtonSize() / BASE_BUTTON_SIZE)
     button:SetPoint(
         "BOTTOMLEFT",
         bar,
@@ -247,8 +252,8 @@ local function CreateMobileButton(index)
     end)
 
     local cooldown = CreateFrame("Model", nil, button)
-    cooldown:SetWidth(ButtonSize())
-    cooldown:SetHeight(ButtonSize())
+    cooldown:SetWidth(BASE_BUTTON_SIZE)
+    cooldown:SetHeight(BASE_BUTTON_SIZE)
     cooldown:SetPoint("CENTER", button, "CENTER", 0, 0)
     cooldown:SetModel("Interface\\Cooldown\\UI-Cooldown-Indicator.mdx")
     cooldown:SetFrameStrata("HIGH")
@@ -428,8 +433,11 @@ local function ResizeButtons()
         local column = (i - 1) - math.floor((i - 1) / GRID_COLUMNS) * GRID_COLUMNS
         local row = math.floor((i - 1) / GRID_COLUMNS)
 
-        button:SetWidth(size)
-        button:SetHeight(size)
+        -- Keep the template at its authored size and scale the complete control tree.
+        -- This includes the fixed 66x66 slot border and the cooldown Model's mask geometry.
+        button:SetWidth(BASE_BUTTON_SIZE)
+        button:SetHeight(BASE_BUTTON_SIZE)
+        button:SetScale(size / BASE_BUTTON_SIZE)
         button:ClearAllPoints()
         button:SetPoint(
             "BOTTOMLEFT",
@@ -439,10 +447,12 @@ local function ResizeButtons()
             row * (size + BUTTON_SPACING)
         )
 
-        button.mobileCooldown:SetWidth(size)
-        button.mobileCooldown:SetHeight(size)
+        -- The cooldown overlay and number inherit the button's scale. Do not resize the
+        -- Model viewport independently: its internal cooldown mesh is fixed-size in 1.12.
+        button.mobileCooldown:SetWidth(BASE_BUTTON_SIZE)
+        button.mobileCooldown:SetHeight(BASE_BUTTON_SIZE)
         button.mobileCooldownText:SetFont(
-            "Fonts\\FRIZQT__.TTF", math.floor(size * 0.29), "OUTLINE"
+            "Fonts\\FRIZQT__.TTF", 15, "OUTLINE"
         )
         i = i + 1
     end

@@ -3,16 +3,17 @@
 -- paging is local to this addon and never changes the stock action-bar page.
 
 local BUTTON_COUNT = 12
-local GRID_COLUMNS = 6
-local GRID_ROWS = 2
+local GRID_COLUMNS = 4
+local GRID_ROWS = 3
 local MAX_ACTION_SLOTS = 120
 local UPDATE_INTERVAL = 0.12
 -- The stock ActionButtonTemplate and its cooldown model are authored at 36 UI units.
 -- Scale the whole control from this base so its fixed-size border textures and model mask
 -- grow with the icon, instead of only enlarging the parent frame.
 local BASE_BUTTON_SIZE = 36
-local DEFAULT_BUTTON_SIZE = 68
-local PREVIOUS_DEFAULT_BUTTON_SIZE = 52
+local DEFAULT_BUTTON_SIZE = 96
+local PREVIOUS_DEFAULT_BUTTON_SIZE_1 = 52
+local PREVIOUS_DEFAULT_BUTTON_SIZE_2 = 68
 local MAX_BUTTON_SIZE = 96
 local BUTTON_SPACING = 6
 local HEADER_HEIGHT = 26
@@ -45,11 +46,13 @@ local function InitializeSettings()
 
     -- Move existing installs from the original 52-point default to the larger mobile default,
     -- but preserve a size the player already chose explicitly.
-    if BenillaMobileDB.version ~= 2 then
-        if BenillaMobileDB.buttonSize == PREVIOUS_DEFAULT_BUTTON_SIZE then
+    if BenillaMobileDB.version ~= 3 then
+        -- Upgrade installations still using either shipped default. Preserve other explicit sizes.
+        if BenillaMobileDB.buttonSize == PREVIOUS_DEFAULT_BUTTON_SIZE_1
+            or BenillaMobileDB.buttonSize == PREVIOUS_DEFAULT_BUTTON_SIZE_2 then
             BenillaMobileDB.buttonSize = DEFAULT_BUTTON_SIZE
         end
-        BenillaMobileDB.version = 2
+        BenillaMobileDB.version = 3
     end
     if BenillaMobileDB.visibility ~= "show"
         and BenillaMobileDB.visibility ~= "hide"

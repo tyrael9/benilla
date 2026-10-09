@@ -62,7 +62,16 @@ impl Default for Realmlist {
                 pinned_by_env: true,
             },
             _ => Realmlist {
-                address: saved_ios_realmlist().unwrap_or_else(|| DEFAULT_REALMLIST.to_string()),
+                address: {
+                    #[cfg(target_os = "ios")]
+                    {
+                        saved_ios_realmlist().unwrap_or_else(|| DEFAULT_REALMLIST.to_string())
+                    }
+                    #[cfg(not(target_os = "ios"))]
+                    {
+                        DEFAULT_REALMLIST.to_string()
+                    }
+                },
                 pinned_by_env: false,
             },
         }

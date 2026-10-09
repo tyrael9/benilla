@@ -414,7 +414,12 @@ pub(super) fn feed_ui_input(
                 y,
                 &scroll,
             );
-        } else if !synthetic {
+        } else if !synthetic && {
+            #[cfg(target_os = "ios")]
+            { touch_id.is_none() }
+            #[cfg(not(target_os = "ios"))]
+            { true }
+        } {
             if hover.0.take().is_some() {
                 script.mouse_move(f32::MIN, f32::MIN);
             }

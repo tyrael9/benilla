@@ -96,6 +96,32 @@ local function GetButtonPart(button, suffix)
     return getglobal(name .. suffix)
 end
 
+-- The 1.12 Interface Options panel exposes the action-slot lock as LOCK_ACTIONBAR.
+-- Declare these before the button callbacks so Lua closes over the local functions rather than
+-- resolving them as missing globals.
+local function IsGameActionBarLocked()
+    if LOCK_ACTIONBAR ~= nil then
+        return LOCK_ACTIONBAR == "1" or LOCK_ACTIONBAR == 1
+    end
+
+    if type(GetCVar) == "function" then
+        local value = GetCVar("lockActionBars")
+        return value == "1" or value == 1
+    end
+
+    return false
+end
+
+local function CanPickupActionSlot()
+    if not IsGameActionBarLocked() then
+        return true
+    end
+
+    -- Preserve WoW's configured modified-click pickup action while bars are locked.
+    return type(IsModifiedClick) == "function"
+        and IsModifiedClick("PICKUPACTION")
+end
+
 -- The reference cooldown indicator is a model overlay in this client.
 function BenillaMobile_CooldownFrame_SetTimer(this, start, duration, enable)
     if start and duration and enable
@@ -500,31 +526,6 @@ local function PositionBar()
         BenillaMobileDB.x,
         BenillaMobileDB.y
     )
-end
-
--- The 1.12 Interface Options panel exposes the action-slot lock as LOCK_ACTIONBAR.
--- Prefer that legacy setting; use the matching CVar only as a fallback.
-local function IsGameActionBarLocked()
-    if LOCK_ACTIONBAR ~= nil then
-        return LOCK_ACTIONBAR == "1" or LOCK_ACTIONBAR == 1
-    end
-
-    if type(GetCVar) == "function" then
-        local value = GetCVar("lockActionBars")
-        return value == "1" or value == 1
-    end
-
-    return false
-end
-
-local function CanPickupActionSlot()
-    if not IsGameActionBarLocked() then
-        return true
-    end
-
-    -- Preserve WoW's configured modified-click pickup action while bars are locked.
-    return type(IsModifiedClick) == "function"
-        and IsModifiedClick("PICKUPACTION")
 end
 
 header:SetScript("OnDragStart", function()

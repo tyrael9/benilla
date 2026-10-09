@@ -191,26 +191,37 @@ pageLabel:SetText("1 / 10")
 local mobileButtons = {}
 
 local function CreateMobileButton(index)
-    local button = CreateFrame(
-        "CheckButton",
-        "BenillaMobileButton" .. index,
-        bar,
-        "ActionButtonTemplate"
-    )
-
     local column = (index - 1) - math.floor((index - 1) / GRID_COLUMNS) * GRID_COLUMNS
     local row = math.floor((index - 1) / GRID_COLUMNS)
 
-    button:SetWidth(BASE_BUTTON_SIZE)
-    button:SetHeight(BASE_BUTTON_SIZE)
-    button:SetScale(ButtonSize() / BASE_BUTTON_SIZE)
-    button:SetPoint(
+    -- The unscaled slot owns layout spacing. Scaling a button anchored directly to the bar also
+    -- scales its anchor offsets in the 1.12 frame model, which makes gaps balloon with button size.
+    local slot = CreateFrame(
+        "Frame",
+        "BenillaMobileSlot" .. index,
+        bar
+    )
+    slot:SetWidth(ButtonSize())
+    slot:SetHeight(ButtonSize())
+    slot:SetPoint(
         "BOTTOMLEFT",
         bar,
         "BOTTOMLEFT",
         column * (ButtonSize() + BUTTON_SPACING),
         row * (ButtonSize() + BUTTON_SPACING)
     )
+
+    local button = CreateFrame(
+        "CheckButton",
+        "BenillaMobileButton" .. index,
+        slot,
+        "ActionButtonTemplate"
+    )
+    button:SetWidth(BASE_BUTTON_SIZE)
+    button:SetHeight(BASE_BUTTON_SIZE)
+    button:SetScale(ButtonSize() / BASE_BUTTON_SIZE)
+    button:SetPoint("CENTER", slot, "CENTER", 0, 0)
+    button.mobileSlot = slot
 
     button.actionIndex = index
     button.actionSlot = ActionSlotForButton(index)
@@ -251,13 +262,16 @@ local function CreateMobileButton(index)
         end
     end)
 
-    local cooldown = CreateFrame("Model", nil, button)
-    cooldown:SetWidth(BASE_BUTTON_SIZE)
-    cooldown:SetHeight(BASE_BUTTON_SIZE)
-    cooldown:SetPoint("CENTER", button, "CENTER", 0, 0)
+    -- Keep the mask in the unscaled slot's coordinate space. The ActionButton scale is for
+    -- its artwork and hit target; inheriting it on this Model compounds the transform and can
+    -- shift the MDX cooldown mesh away from the enlarged icon.
+    local cooldown = CreateFrame("Model", nil, slot)
+    cooldown:SetWidth(ButtonSize())
+    cooldown:SetHeight(ButtonSize())
+    cooldown:SetPoint("CENTER", slot, "CENTER", 0, 0)
     cooldown:SetModel("Interface\\Cooldown\\UI-Cooldown-Indicator.mdx")
     cooldown:SetFrameStrata("HIGH")
-    cooldown:SetFrameLevel(button:GetFrameLevel() + 10)
+    cooldown:SetFrameLevel(slot:GetFrameLevel() + 10)
     cooldown:SetScript(
         "OnUpdateModel",
         BenillaMobile_CooldownFrame_OnUpdateModel
@@ -430,16 +444,15 @@ local function ResizeButtons()
     local i = 1
     while i <= BUTTON_COUNT do
         local button = mobileButtons[i]
+        local slot = button.mobileSlot
         local column = (i - 1) - math.floor((i - 1) / GRID_COLUMNS) * GRID_COLUMNS
         local row = math.floor((i - 1) / GRID_COLUMNS)
 
-        -- Keep the template at its authored size and scale the complete control tree.
-        -- This includes the fixed 66x66 slot border and the cooldown Model's mask geometry.
-        button:SetWidth(BASE_BUTTON_SIZE)
-        button:SetHeight(BASE_BUTTON_SIZE)
-        button:SetScale(size / BASE_BUTTON_SIZE)
-        button:ClearAllPoints()
-        button:SetPoint(
+        -- Slot placement stays unscaled; only the button's visuals/hit target grow.
+        slot:SetWidth(size)
+        slot:SetHeight(size)
+        slot:ClearAllPoints()
+        slot:SetPoint(
             "BOTTOMLEFT",
             bar,
             "BOTTOMLEFT",
@@ -447,10 +460,19 @@ local function ResizeButtons()
             row * (size + BUTTON_SPACING)
         )
 
-        -- The cooldown overlay and number inherit the button's scale. Do not resize the
-        -- Model viewport independently: its internal cooldown mesh is fixed-size in 1.12.
-        button.mobileCooldown:SetWidth(BASE_BUTTON_SIZE)
-        button.mobileCooldown:SetHeight(BASE_BUTTON_SIZE)
+        button:SetWidth(BASE_BUTTON_SIZE)
+        button:SetHeight(BASE_BUTTON_SIZE)
+        button:SetScale(size / BASE_BUTTON_SIZE)
+        button:ClearAllPoints()
+        button:SetPoint("CENTER", slot, "CENTER", 0, 0)
+
+        -- The cooldown Model is a sibling of the scaled button, so size its viewport to the
+        -- slot and center it there. This keeps its fixed MDX mesh aligned as button size changes.
+        button.mobileCooldown:SetWidth(size)
+        button.mobileCooldown:SetHeight(size)
+        button.mobileCooldown:ClearAllPoints()
+        button.mobileCooldown:SetPoint("CENTER", slot, "CENTER", 0, 0)
+
         button.mobileCooldownText:SetFont(
             "Fonts\\FRIZQT__.TTF", 15, "OUTLINE"
         )

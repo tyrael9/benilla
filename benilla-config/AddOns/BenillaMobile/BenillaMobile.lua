@@ -62,6 +62,9 @@ local function InitializeSettings()
     if BenillaMobileDB.autoHideWithGamepad == nil then
         BenillaMobileDB.autoHideWithGamepad = true
     end
+    if BenillaMobileDB.locked == nil then
+        BenillaMobileDB.locked = true
+    end
 
     BenillaMobileDB.buttonSize =
         math.max(40, math.min(MAX_BUTTON_SIZE, BenillaMobileDB.buttonSize))
@@ -162,11 +165,14 @@ bar:SetPoint(
 )
 bar:SetFrameStrata("MEDIUM")
 bar:EnableMouse(false)
+bar:SetMovable(1)
 
 local header = CreateFrame("Frame", "BenillaMobileHeader", bar)
 header:SetWidth(BAR_WIDTH)
 header:SetHeight(HEADER_HEIGHT)
 header:SetPoint("BOTTOMLEFT", bar, "TOPLEFT", 0, -HEADER_HEIGHT)
+header:EnableMouse(1)
+header:RegisterForDrag("LeftButton")
 
 local function CreateHeaderButton(name, text, point, relativePoint, x)
     local button = CreateFrame("Button", name, header, "UIPanelButtonTemplate")
@@ -253,7 +259,7 @@ local function CreateMobileButton(index)
 
     button:SetScript("OnDragStart", function()
         local action = this.actionSlot
-        if action then
+        if action and CanPickupActionSlot() then
             PickupAction(action)
         end
     end)
@@ -496,6 +502,53 @@ local function PositionBar()
     )
 end
 
+-- The 1.12 Interface Options panel exposes the action-slot lock as LOCK_ACTIONBAR.
+-- Prefer that legacy setting; use the matching CVar only as a fallback.
+local function IsGameActionBarLocked()
+    if LOCK_ACTIONBAR ~= nil then
+        return LOCK_ACTIONBAR == "1" or LOCK_ACTIONBAR == 1
+    end
+
+    if type(GetCVar) == "function" then
+        local value = GetCVar("lockActionBars")
+        return value == "1" or value == 1
+    end
+
+    return false
+end
+
+local function CanPickupActionSlot()
+    if not IsGameActionBarLocked() then
+        return true
+    end
+
+    -- Preserve WoW's configured modified-click pickup action while bars are locked.
+    return type(IsModifiedClick) == "function"
+        and IsModifiedClick("PICKUPACTION")
+end
+
+header:SetScript("OnDragStart", function()
+    if BenillaMobileDB.locked then
+        return
+    end
+
+    bar:StartMoving()
+end)
+
+header:SetScript("OnDragStop", function()
+    bar:StopMovingOrSizing()
+
+    local left = bar:GetLeft()
+    local bottom = bar:GetBottom()
+    if left and bottom then
+        -- Persist the same bottom-center anchor PositionBar uses.
+        BenillaMobileDB.x =
+            left + bar:GetWidth() / 2 - UIParent:GetWidth() / 2
+        BenillaMobileDB.y = bottom
+        PositionBar()
+    end
+end)
+
 local function IsPhysicalGamepadConnected()
     if type(Gamepad_IsConnected) == "function" then
         return Gamepad_IsConnected()
@@ -580,6 +633,16 @@ SlashCmdList["BENILLAMOBILE"] = function(message)
         bar:Hide()
     elseif command == "auto" then
         BenillaMobileDB.visibility = "auto"
+    elseif command == "lock" then
+        BenillaMobileDB.locked = true
+        DEFAULT_CHAT_FRAME:AddMessage(
+            "BenillaMobile: bar locked. Use /bm unlock to move it."
+        )
+    elseif command == "unlock" then
+        BenillaMobileDB.locked = false
+        DEFAULT_CHAT_FRAME:AddMessage(
+            "BenillaMobile: bar unlocked. Drag the header to move it; use /bm lock when done."
+        )
     elseif command == "left" then
         NudgeBar(-10, 0)
     elseif command == "right" then
@@ -615,7 +678,7 @@ SlashCmdList["BENILLAMOBILE"] = function(message)
         DEFAULT_CHAT_FRAME:AddMessage(
             "BenillaMobile: /bm next | prev | page <1-" ..
             tostring(PAGE_COUNT) ..
-            "> | show | hide | auto | left/right/up/down | size <40-96> | gamepad on/off | reset"
+            "> | show | hide | auto | lock/unlock | left/right/up/down | size <40-96> | gamepad on/off | reset"
         )
     end
 end

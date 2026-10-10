@@ -20,10 +20,12 @@ local HEADER_HEIGHT = 26
 local DEFAULT_X = 0
 local DEFAULT_Y = 18
 
--- The touch router in benilla-app uses these same UI-space coordinates.
-local TOUCH_STICK_CENTER_X = 107
-local TOUCH_STICK_CENTER_Y = 114
-local TOUCH_STICK_RADIUS = 72
+-- Touch-stick geometry uses the same UI coordinate system as the core's touch hit-test.
+local DEFAULT_TOUCH_STICK_X = 132
+local DEFAULT_TOUCH_STICK_Y = 136
+local TOUCH_STICK_RADIUS = 96
+local TOUCH_STICK_THUMB_SIZE = 66
+local TOUCH_STICK_THUMB_TRAVEL = 48
 
 local RANGE_COLOR_R = 1.0
 local RANGE_COLOR_G = 0.10
@@ -72,6 +74,15 @@ local function InitializeSettings()
     end
     if BenillaMobileDB.touchStickEnabled == nil then
         BenillaMobileDB.touchStickEnabled = true
+    end
+    if type(BenillaMobileDB.touchStickX) ~= "number" then
+        BenillaMobileDB.touchStickX = DEFAULT_TOUCH_STICK_X
+    end
+    if type(BenillaMobileDB.touchStickY) ~= "number" then
+        BenillaMobileDB.touchStickY = DEFAULT_TOUCH_STICK_Y
+    end
+    if BenillaMobileDB.touchStickUnlocked == nil then
+        BenillaMobileDB.touchStickUnlocked = false
     end
 
     BenillaMobileDB.buttonSize =
@@ -231,8 +242,8 @@ pageLabel:SetFont("Fonts\\FRIZQT__.TTF", 12, "OUTLINE")
 pageLabel:SetPoint("CENTER", header, "CENTER", 0, 0)
 pageLabel:SetText("1 / 10")
 
--- A visual-only thumbstick. Touch routing is handled by benilla-app so the stick and the WoW UI
--- can own different fingers at the same time; these frames must never capture mouse input.
+-- Round stick artwork. Movement capture lives in benilla-app so another finger can
+-- continue tapping WoW UI while this finger owns the movement axis.
 local function IsTouchDevice()
     return type(Gamepad_IsTouchDevice) == "function"
         and Gamepad_IsTouchDevice()
@@ -241,46 +252,96 @@ end
 local touchStick = CreateFrame("Frame", "BenillaMobileTouchStick", UIParent)
 touchStick:SetWidth(TOUCH_STICK_RADIUS * 2)
 touchStick:SetHeight(TOUCH_STICK_RADIUS * 2)
-touchStick:SetPoint(
-    "BOTTOMLEFT",
-    UIParent,
-    "BOTTOMLEFT",
-    TOUCH_STICK_CENTER_X - TOUCH_STICK_RADIUS,
-    TOUCH_STICK_CENTER_Y - TOUCH_STICK_RADIUS
-)
 touchStick:SetFrameStrata("MEDIUM")
-touchStick:EnableMouse(false)
+touchStick:SetMovable(1)
+touchStick:RegisterForDrag("LeftButton")
 
 local stickBackground = touchStick:CreateTexture("BenillaMobileTouchStickBackground", "BACKGROUND")
 stickBackground:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
-stickBackground:SetVertexColor(0.20, 0.28, 0.36)
-stickBackground:SetAlpha(0.72)
+stickBackground:SetVertexColor(0.18, 0.24, 0.32)
+stickBackground:SetAlpha(0.68)
 stickBackground:SetAllPoints(touchStick)
 
 local stickBorder = touchStick:CreateTexture("BenillaMobileTouchStickBorder", "OVERLAY")
 stickBorder:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
-stickBorder:SetAlpha(0.80)
+stickBorder:SetAlpha(0.90)
 stickBorder:SetAllPoints(touchStick)
 
 local touchStickThumb = CreateFrame("Frame", "BenillaMobileTouchStickThumb", touchStick)
-touchStickThumb:SetWidth(54)
-touchStickThumb:SetHeight(54)
+touchStickThumb:SetWidth(TOUCH_STICK_THUMB_SIZE)
+touchStickThumb:SetHeight(TOUCH_STICK_THUMB_SIZE)
 touchStickThumb:EnableMouse(false)
 local thumbTexture = touchStickThumb:CreateTexture("BenillaMobileTouchStickThumbTexture", "ARTWORK")
-thumbTexture:SetTexture("Interface\\Buttons\\UI-Quickslot2")
-thumbTexture:SetVertexColor(0.80, 0.88, 1.0)
-thumbTexture:SetAlpha(0.95)
+thumbTexture:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
+thumbTexture:SetVertexColor(0.72, 0.86, 1.0)
+thumbTexture:SetAlpha(1.0)
 thumbTexture:SetAllPoints(touchStickThumb)
 touchStickThumb:SetPoint("CENTER", touchStick, "CENTER", 0, 0)
 
+local function PositionTouchStick()
+    touchStick:ClearAllPoints()
+    touchStick:SetPoint(
+        "BOTTOMLEFT",
+        UIParent,
+        "BOTTOMLEFT",
+        BenillaMobileDB.touchStickX - TOUCH_STICK_RADIUS,
+        BenillaMobileDB.touchStickY - TOUCH_STICK_RADIUS
+    )
+end
+
+local function SyncTouchStickConfig()
+    if type(Gamepad_SetTouchStick) == "function" then
+        Gamepad_SetTouchStick(
+            BenillaMobileDB.touchStickX,
+            BenillaMobileDB.touchStickY,
+            TOUCH_STICK_RADIUS,
+            BenillaMobileDB.touchStickEnabled,
+            BenillaMobileDB.touchStickUnlocked
+        )
+    end
+end
+
 local function UpdateTouchStickVisibility()
-    if IsTouchDevice() and BenillaMobileDB.touchStickEnabled then
+    local visible = IsTouchDevice() and BenillaMobileDB.touchStickEnabled
+    if visible then
         touchStick:Show()
     else
         touchStick:Hide()
     end
+    touchStick:EnableMouse(visible and BenillaMobileDB.touchStickUnlocked and 1 or 0)
+    SyncTouchStickConfig()
 end
 
+touchStick:SetScript("OnDragStart", function()
+    if not BenillaMobileDB.touchStickUnlocked then
+        return
+    end
+    touchStick:StartMoving()
+end)
+
+touchStick:SetScript("OnDragStop", function()
+    touchStick:StopMovingOrSizing()
+    local left = touchStick:GetLeft()
+    local bottom = touchStick:GetBottom()
+    if left and bottom then
+        local minCenterX = TOUCH_STICK_RADIUS + 8
+        local maxCenterX = math.max(minCenterX, UIParent:GetWidth() - TOUCH_STICK_RADIUS - 8)
+        local minCenterY = TOUCH_STICK_RADIUS + 8
+        local maxCenterY = math.max(minCenterY, UIParent:GetHeight() - TOUCH_STICK_RADIUS - 8)
+        BenillaMobileDB.touchStickX = math.max(
+            minCenterX,
+            math.min(maxCenterX, left + TOUCH_STICK_RADIUS)
+        )
+        BenillaMobileDB.touchStickY = math.max(
+            minCenterY,
+            math.min(maxCenterY, bottom + TOUCH_STICK_RADIUS)
+        )
+    end
+    PositionTouchStick()
+    SyncTouchStickConfig()
+end)
+
+PositionTouchStick()
 UpdateTouchStickVisibility()
 
 local mobileButtons = {}
@@ -645,8 +706,8 @@ updateFrame:SetScript("OnUpdate", function()
             "CENTER",
             touchStick,
             "CENTER",
-            x * 34,
-            y * 34
+            x * TOUCH_STICK_THUMB_TRAVEL,
+            y * TOUCH_STICK_THUMB_TRAVEL
         )
     end
 
@@ -746,9 +807,21 @@ SlashCmdList["BENILLAMOBILE"] = function(message)
         elseif value == "off" then
             BenillaMobileDB.touchStickEnabled = false
             UpdateTouchStickVisibility()
+        elseif value == "unlock" then
+            BenillaMobileDB.touchStickUnlocked = true
+            UpdateTouchStickVisibility()
+            DEFAULT_CHAT_FRAME:AddMessage(
+                "BenillaMobile: touch stick unlocked; drag it to reposition, then use /bm stick lock."
+            )
+        elseif value == "lock" then
+            BenillaMobileDB.touchStickUnlocked = false
+            UpdateTouchStickVisibility()
+            DEFAULT_CHAT_FRAME:AddMessage(
+                "BenillaMobile: touch stick locked."
+            )
         else
             DEFAULT_CHAT_FRAME:AddMessage(
-                "BenillaMobile: /bm stick on | off"
+                "BenillaMobile: /bm stick on | off | lock | unlock"
             )
         end
     elseif command == "reset" then
@@ -758,6 +831,10 @@ SlashCmdList["BENILLAMOBILE"] = function(message)
         BenillaMobileDB.visibility = "auto"
         BenillaMobileDB.autoHideWithGamepad = true
         BenillaMobileDB.touchStickEnabled = true
+        BenillaMobileDB.touchStickX = DEFAULT_TOUCH_STICK_X
+        BenillaMobileDB.touchStickY = DEFAULT_TOUCH_STICK_Y
+        BenillaMobileDB.touchStickUnlocked = false
+        PositionTouchStick()
         UpdateTouchStickVisibility()
         SetPage(1)
         ResizeButtons()
@@ -766,7 +843,7 @@ SlashCmdList["BENILLAMOBILE"] = function(message)
         DEFAULT_CHAT_FRAME:AddMessage(
             "BenillaMobile: /bm next | prev | page <1-" ..
             tostring(PAGE_COUNT) ..
-            "> | show | hide | auto | lock/unlock | left/right/up/down | size <40-96> | gamepad on/off | stick on/off | reset"
+            "> | show | hide | auto | lock/unlock | left/right/up/down | size <40-96> | gamepad on/off | stick on/off/lock/unlock | reset"
         )
     end
 end

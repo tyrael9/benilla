@@ -14,15 +14,27 @@ use crate::bindings::WheelNotches;
 use crate::textinput::{self, keymap, HostClipboard};
 
 #[cfg(any(target_os = "ios", test))]
-fn touch_stick_contains(x: f32, y: f32) -> bool {
-    let dx = x - 107.0;
-    let dy = y - 114.0;
-    dx * dx + dy * dy <= 72.0 * 72.0
+fn touch_stick_contains(
+    x: f32,
+    y: f32,
+    center_x: f32,
+    center_y: f32,
+    radius: f32,
+) -> bool {
+    let dx = x - center_x;
+    let dy = y - center_y;
+    dx * dx + dy * dy <= radius * radius
 }
 
 #[cfg(any(target_os = "ios", test))]
-fn touch_stick_axes(x: f32, y: f32) -> Vec2 {
-    Vec2::new((x - 107.0) / 72.0, (y - 114.0) / 72.0)
+fn touch_stick_axes(
+    x: f32,
+    y: f32,
+    center_x: f32,
+    center_y: f32,
+    radius: f32,
+) -> Vec2 {
+    Vec2::new((x - center_x) / radius, (y - center_y) / radius)
         .clamp_length_max(1.0)
 }
 
@@ -173,13 +185,26 @@ pub(super) fn feed_ui_input(
     #[cfg(target_os = "ios")]
     {
         use bevy::input::touch::TouchPhase;
+        let (stick_x, stick_y, stick_radius, stick_enabled, stick_unlocked) =
+            script.eval::<(f32, f32, f32, bool, bool)>(
+                "return Gamepad_GetTouchStick()"
+            ).unwrap_or((132.0, 136.0, 96.0, true, false));
+
         for touch in touches.read() {
             let s = super::seam_scale(window.height(), ui_scale.0);
             let (x, y) = (touch.position.x / s, (window.height() - touch.position.y) / s);
 
-            // Match the addon visual: 144 UI units at bottom-left (35, 42), radius 72.
-            // Keep UI hit targets higher priority in the normal single-pointer route.
-            let in_move_stick = touch_stick_contains(x, y);
+            // Geometry and drag mode are published by BenillaMobile.
+            // A UI frame (including the stick while unlocked) takes priority over movement.
+            let in_move_stick = stick_enabled
+                && !stick_unlocked
+                && touch_stick_contains(
+                    x,
+                    y,
+                    stick_x,
+                    stick_y,
+                    stick_radius,
+                );
             let can_route_ui = !gamepad_mouse && touch_ui_id.is_none();
             let hit = if can_route_ui {
                 script.mouse_move(x, y)
@@ -195,7 +220,8 @@ pub(super) fn feed_ui_input(
                     if hit.is_none() && in_move_stick && touch_move_id.is_none() {
                         *touch_move_id = Some(touch.id);
                         gamepad.touch_move_active = true;
-                        gamepad.touch_move_stick = touch_stick_axes(x, y);
+                        gamepad.touch_move_stick =
+                            touch_stick_axes(x, y, stick_x, stick_y, stick_radius);
                         hover.0 = None;
                     } else if can_route_ui {
                         *touch_ui_id = Some(touch.id);
@@ -205,7 +231,8 @@ pub(super) fn feed_ui_input(
                 }
                 TouchPhase::Moved if *touch_move_id == Some(touch.id) => {
                     ios_touch_event_this_frame = true;
-                    gamepad.touch_move_stick = touch_stick_axes(x, y);
+                    gamepad.touch_move_stick =
+                        touch_stick_axes(x, y, stick_x, stick_y, stick_radius);
                 }
                 TouchPhase::Moved if *touch_ui_id == Some(touch.id) => {
                     ios_touch_event_this_frame = true;
@@ -645,13 +672,15 @@ mod touch_stick_tests {
     use super::*;
 
     #[test]
-    fn touch_stick_center_and_cardinal_axes_are_consistent_with_the_overlay() {
-        assert!(touch_stick_contains(107.0, 114.0));
-        assert_eq!(touch_stick_axes(107.0, 114.0), Vec2::ZERO);
-        assert_eq!(touch_stick_axes(107.0, 186.0), Vec2::Y);
-        assert_eq!(touch_stick_axes(179.0, 114.0), Vec2::X);
+    fn touch_stick_center_and_cardinal_axes_follow_saved_geometry() {
+        let (cx, cy, radius) = (132.0, 136.0, 96.0);
+        assert!(touch_stick_contains(cx, cy, cx, cy, radius));
+        assert!(!touch_stick_contains(cx + radius + 1.0, cy, cx, cy, radius));
+        assert_eq!(touch_stick_axes(cx, cy, cx, cy, radius), Vec2::ZERO);
+        assert_eq!(touch_stick_axes(cx, cy + radius, cx, cy, radius), Vec2::Y);
+        assert_eq!(touch_stick_axes(cx + radius, cy, cx, cy, radius), Vec2::X);
 
-        let diagonal = touch_stick_axes(200.0, 200.0);
+        let diagonal = touch_stick_axes(cx + radius, cy + radius, cx, cy, radius);
         assert!(diagonal.length() <= 1.00001);
     }
 }

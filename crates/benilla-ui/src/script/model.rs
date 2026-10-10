@@ -996,6 +996,12 @@ pub(crate) struct Model {
     pub(crate) modifiers: (bool, bool, bool),
     /// gamepad state for Lua.
     pub(crate) gamepad: GamepadLuaState,
+    /// Persistent UI-space geometry/mode for the iOS virtual movement stick.
+    pub(crate) touch_stick_center_x: f32,
+    pub(crate) touch_stick_center_y: f32,
+    pub(crate) touch_stick_radius: f32,
+    pub(crate) touch_stick_enabled: bool,
+    pub(crate) touch_stick_unlocked: bool,
 }
 
 impl Model {
@@ -1502,6 +1508,11 @@ impl Model {
             reputation_selected: None,
             reputation_sends: Vec::new(),
             gamepad: GamepadLuaState::default(),
+            touch_stick_center_x: 132.0,
+            touch_stick_center_y: 136.0,
+            touch_stick_radius: 96.0,
+            touch_stick_enabled: true,
+            touch_stick_unlocked: false,
         }
     }
 

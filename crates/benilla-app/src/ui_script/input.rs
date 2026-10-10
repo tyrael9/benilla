@@ -49,7 +49,7 @@ fn touch_look_started_drag(start: Vec2, current: Vec2) -> bool {
 /// system-parameter arity limit. Other platforms leave these fields at their defaults.
 #[allow(dead_code)]
 #[derive(Default)]
-struct IosTouchState {
+pub(super) struct IosTouchState {
     touch_ui_id: Option<u64>,
     touch_move_id: Option<u64>,
     touch_ui_state: Option<(f32, Vec2, Vec2, Vec2, bool, bool, bool)>,

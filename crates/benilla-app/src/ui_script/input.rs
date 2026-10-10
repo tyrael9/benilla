@@ -185,8 +185,8 @@ pub(super) fn feed_ui_input(
     #[cfg(target_os = "ios")]
     {
         use bevy::input::touch::TouchPhase;
-        let touch_events = touches.read();
-        if !touch_events.is_empty() {
+        let mut touch_events = touches.read().peekable();
+        if touch_events.peek().is_some() {
             // eval::<T> reads one return value, so retrieve the saved stick config as scalar values.
             let stick_x = script.eval::<f32>(
                 "return Gamepad_GetTouchStickValue('X')"

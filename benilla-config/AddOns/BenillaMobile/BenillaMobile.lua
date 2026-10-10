@@ -309,6 +309,15 @@ local function PositionTouchStick()
     )
 end
 
+local function IsPhysicalGamepadConnected()
+    if type(Gamepad_IsConnected) == "function" then
+        return Gamepad_IsConnected()
+    end
+    return false
+end
+
+local lastPhysicalGamepadConnected = nil
+
 local function SyncTouchStickConfig()
     if type(Gamepad_SetTouchStick) == "function" then
         Gamepad_SetTouchStick(
@@ -316,14 +325,19 @@ local function SyncTouchStickConfig()
             BenillaMobileDB.touchStickY,
             TOUCH_STICK_RADIUS,
             TOUCH_STICK_THUMB_TRAVEL,
-            BenillaMobileDB.touchStickEnabled,
+            BenillaMobileDB.touchStickEnabled
+                and not IsPhysicalGamepadConnected(),
             BenillaMobileDB.touchStickUnlocked
         )
     end
 end
 
 local function UpdateTouchStickVisibility()
-    local visible = IsTouchDevice() and BenillaMobileDB.touchStickEnabled
+    local connected = IsPhysicalGamepadConnected()
+    local visible = IsTouchDevice()
+        and BenillaMobileDB.touchStickEnabled
+        and not connected
+
     if visible then
         touchStick:Show()
     else
@@ -331,6 +345,16 @@ local function UpdateTouchStickVisibility()
     end
     touchStick:EnableMouse(visible and BenillaMobileDB.touchStickUnlocked and 1 or 0)
     SyncTouchStickConfig()
+    lastPhysicalGamepadConnected = connected
+end
+
+-- The gamepad state is refreshed by the core every frame. Only resync the addon-owned stick when
+-- the connection state changes, rather than rewriting its geometry on every OnUpdate.
+local function RefreshTouchStickVisibility()
+    local connected = IsPhysicalGamepadConnected()
+    if connected ~= lastPhysicalGamepadConnected then
+        UpdateTouchStickVisibility()
+    end
 end
 
 touchStick:SetScript("OnDragStart", function()
@@ -692,12 +716,6 @@ header:SetScript("OnDragStop", function()
     end
 end)
 
-local function IsPhysicalGamepadConnected()
-    if type(Gamepad_IsConnected) == "function" then
-        return Gamepad_IsConnected()
-    end
-    return false
-end
 
 local function ShouldShowBar()
     if BenillaMobileDB.visibility == "show" then
@@ -719,6 +737,8 @@ local shown = nil
 
 local updateFrame = CreateFrame("Frame", "BenillaMobileUpdateFrame", UIParent)
 updateFrame:SetScript("OnUpdate", function()
+    RefreshTouchStickVisibility()
+
     if touchStick:IsShown() then
         local moving = type(Gamepad_IsTouchStickActive) == "function"
             and Gamepad_IsTouchStickActive()

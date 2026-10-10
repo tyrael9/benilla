@@ -219,8 +219,13 @@ pub(super) fn feed_ui_input(
                     stick_y,
                     stick_radius,
                 );
+            // The reserved movement zone must win over background UI frames (for example the
+            // chat panel). Otherwise hit-testing consumes the finger before it reaches the stick.
+            let claim_move = matches!(touch.phase, TouchPhase::Started)
+                && in_move_stick
+                && touch_move_id.is_none();
             let can_route_ui = !gamepad_mouse && touch_ui_id.is_none();
-            let hit = if can_route_ui {
+            let hit = if can_route_ui && !claim_move {
                 script.mouse_move(x, y)
                     .filter(|id| !script.is_world_frame(*id))
             } else {
@@ -231,7 +236,7 @@ pub(super) fn feed_ui_input(
                 TouchPhase::Started => {
                     ios_touch_event_this_frame = true;
 
-                    if hit.is_none() && in_move_stick && touch_move_id.is_none() {
+                    if claim_move {
                         *touch_move_id = Some(touch.id);
                         gamepad.touch_move_active = true;
                         gamepad.touch_move_stick =

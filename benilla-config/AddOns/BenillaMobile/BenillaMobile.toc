@@ -2,7 +2,7 @@
 ## Title: Benilla Mobile
 ## Notes: Touch-friendly action bar for Benilla
 ## Author: Zhui
-## Version: 0.4.0
+## Version: 0.4.1
 ## SavedVariables: BenillaMobileDB
 
 BenillaMobile.lua

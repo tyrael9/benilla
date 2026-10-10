@@ -251,7 +251,7 @@ local function IsTouchDevice()
         and Gamepad_IsTouchDevice()
 end
 
-local STICK_TEXTURE = "Interface\\Minimap\\UI-Minimap-Background"
+local STICK_TEXTURE = "Interface\\AddOns\\BenillaMobile\\Textures\\BenillaJoystick.tga"
 
 local touchStick = CreateFrame("Frame", "BenillaMobileTouchStick", UIParent)
 touchStick:SetWidth(TOUCH_STICK_RADIUS * 2)
@@ -260,21 +260,14 @@ touchStick:SetFrameStrata("MEDIUM")
 touchStick:SetMovable(1)
 touchStick:RegisterForDrag("LeftButton")
 
--- Circular base with a darker inset gives it a beveled, recessed look.
--- Avoid the asymmetric tracking-border atlas art, which looked off-center when reused here.
+-- This is a real addon asset: the left half is the base and the right half is the thumb.
+-- Avoids tinting unrelated rectangular game textures to fake a joystick.
 local stickBackground = touchStick:CreateTexture("BenillaMobileTouchStickBackground", "BACKGROUND")
 stickBackground:SetTexture(STICK_TEXTURE)
-stickBackground:SetVertexColor(0.26, 0.43, 0.62)
-stickBackground:SetAlpha(0.92)
+stickBackground:SetTexCoord(0, 0.5, 0, 1)
+stickBackground:SetVertexColor(1, 1, 1)
+stickBackground:SetAlpha(1)
 stickBackground:SetAllPoints(touchStick)
-
-local stickInner = touchStick:CreateTexture("BenillaMobileTouchStickInner", "BORDER")
-stickInner:SetTexture(STICK_TEXTURE)
-stickInner:SetVertexColor(0.035, 0.07, 0.12)
-stickInner:SetAlpha(0.96)
-stickInner:SetWidth(TOUCH_STICK_RADIUS * 2 - 18)
-stickInner:SetHeight(TOUCH_STICK_RADIUS * 2 - 18)
-stickInner:SetPoint("CENTER", touchStick, "CENTER", 0, 0)
 
 local touchStickThumb = CreateFrame("Frame", "BenillaMobileTouchStickThumb", touchStick)
 touchStickThumb:SetWidth(TOUCH_STICK_THUMB_SIZE)
@@ -283,19 +276,12 @@ touchStickThumb:EnableMouse(false)
 
 local thumbTexture = touchStickThumb:CreateTexture("BenillaMobileTouchStickThumbTexture", "ARTWORK")
 thumbTexture:SetTexture(STICK_TEXTURE)
-thumbTexture:SetVertexColor(0.62, 0.80, 0.96)
-thumbTexture:SetAlpha(1.0)
+thumbTexture:SetTexCoord(0.5, 1, 0, 1)
+thumbTexture:SetVertexColor(1, 1, 1)
+thumbTexture:SetAlpha(1)
 thumbTexture:SetAllPoints(touchStickThumb)
 
-local thumbInner = touchStickThumb:CreateTexture("BenillaMobileTouchStickThumbInner", "OVERLAY")
-thumbInner:SetTexture(STICK_TEXTURE)
-thumbInner:SetVertexColor(0.10, 0.20, 0.33)
-thumbInner:SetAlpha(1.0)
-thumbInner:SetWidth(TOUCH_STICK_THUMB_SIZE - 14)
-thumbInner:SetHeight(TOUCH_STICK_THUMB_SIZE - 14)
-thumbInner:SetPoint("CENTER", touchStickThumb, "CENTER", 0, 0)
-
--- Anchor via BOTTOMLEFT coordinates explicitly; the thumb's inset is equal on both axes.
+-- The thumb frame's geometry, not transparent pixels in some unrelated atlas, determines its center.
 touchStickThumb:SetPoint(
     "BOTTOMLEFT",
     touchStick,

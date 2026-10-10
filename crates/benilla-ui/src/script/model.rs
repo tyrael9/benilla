@@ -1514,7 +1514,7 @@ impl Model {
             touch_stick_center_x: 132.0,
             touch_stick_center_y: 136.0,
             touch_stick_radius: 112.0,
-            touch_stick_travel: 73.0,
+            touch_stick_travel: 71.0,
             touch_stick_enabled: true,
             touch_stick_unlocked: false,
         }

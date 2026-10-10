@@ -138,10 +138,28 @@ pub(super) fn feed_ui_input(
     // the virtual movement stick without moving that UI pointer.
     mut touch_ui_id: Local<Option<u64>>,
     mut touch_move_id: Local<Option<u64>>,
-    // (touch id, start position, previous position, crossed-drag-threshold)
-    mut touch_look: Local<Option<(u64, Vec2, Vec2, bool)>>,
+    // (start time, start raw position, start UI position, last UI position,
+    //  left drag active, long-press right active, long-press still eligible)
+    mut touch_ui_state: Local<Option<(f32, Vec2, Vec2, Vec2, bool, bool, bool)>>,
+    // (touch id, start raw position, previous raw position, dragging, start time, right active)
+    mut touch_look: Local<Option<(u64, Vec2, Vec2, bool, f32, bool)>>,
+    // The iOS touch position drives the world's pick ray while the OS has no mouse cursor.
+    mut touch_world_position: Local<Option<Vec2>>,
+    // Release world-touch buttons one frame after press so Bevy preserves the down edge.
+    mut touch_world_release: Local<Option<MouseButton>>,
 ) {
     const GAMEPAD_MOUSE_SPEED: f32 = 700.0;
+
+    // A touch click's release must occur on the next update, not in the same update as its press:
+    // the world input chain needs to observe the down edge and latch the touch-position pick.
+    #[cfg(target_os = "ios")]
+    let touch_world_release_on_this_frame = {
+        let pending = (*touch_world_release).take();
+        if let Some(button) = pending {
+            buttons.release(button);
+        }
+        pending
+    };
 
     let (keyboard, keys, capture, clipboard) = (&mut kbd.0, &kbd.1, &mut kbd.2, &mut kbd.3);
     let world_pick = pointer.world_pick();
@@ -195,6 +213,9 @@ pub(super) fn feed_ui_input(
     {
         gamepad.touch_look_delta = Vec2::ZERO;
         gamepad.touch_look_active = touch_look.as_ref().map(|state| state.3).unwrap_or(false);
+
+        const IOS_WORLD_LONG_PRESS_SECS: f32 = 1.0;
+        const IOS_UI_LONG_PRESS_SECS: f32 = 3.0;
 
         use bevy::input::touch::TouchPhase;
         let mut touch_events = touches.read().peekable();
@@ -261,16 +282,35 @@ pub(super) fn feed_ui_input(
                             touch_stick_axes(x, y, stick_x, stick_y, stick_travel);
                         hover.0 = None;
                     } else if can_route_ui && hit.is_none() {
-                        // Defer a world click until release: if this becomes a drag, it is camera
-                        // input instead of an accidental target click.
+                        // World clicks are injected through Bevy's mouse input below, not just
+                        // UiScript: the world ray must use this touch's position as well.
                         if touch_look.is_none() {
-                            *touch_look = Some((touch.id, raw_position, raw_position, false));
+                            *touch_look = Some((
+                                touch.id,
+                                raw_position,
+                                raw_position,
+                                false,
+                                time.elapsed_secs(),
+                                false,
+                            ));
                         }
+                        *touch_world_position = Some(Vec2::new(x, y));
                         hover.0 = None;
                     } else if can_route_ui {
+                        // Defer a UI tap's left-down until release, so a long hold can become a
+                        // right-click without first activating the left button. Real UI drags
+                        // start left-down as soon as the finger crosses the drag threshold.
                         *touch_ui_id = Some(touch.id);
+                        *touch_ui_state = Some((
+                            time.elapsed_secs(),
+                            raw_position,
+                            Vec2::new(x, y),
+                            Vec2::new(x, y),
+                            false,
+                            false,
+                            true,
+                        ));
                         hover.0 = hit;
-                        script.mouse_button(x, y, "LeftButton", true);
                     }
                 }
                 TouchPhase::Moved if *touch_move_id == Some(touch.id) => {
@@ -282,7 +322,8 @@ pub(super) fn feed_ui_input(
                     if touch_look.as_ref().map(|state| state.0) == Some(touch.id) =>
                 {
                     ios_touch_event_this_frame = true;
-                    let (_, start, previous, was_dragging) = *touch_look.as_ref().unwrap();
+                    let (_, start, previous, was_dragging, started_at, right_down) =
+                        *touch_look.as_ref().unwrap();
                     let dragging = was_dragging || touch_look_started_drag(start, raw_position);
                     if dragging {
                         gamepad.touch_look_delta += if was_dragging {
@@ -292,12 +333,42 @@ pub(super) fn feed_ui_input(
                         };
                         gamepad.touch_look_active = true;
                     }
-                    *touch_look = Some((touch.id, start, raw_position, dragging));
+                    *touch_world_position = Some(Vec2::new(x, y));
+                    *touch_look = Some((
+                        touch.id,
+                        start,
+                        raw_position,
+                        dragging,
+                        started_at,
+                        right_down,
+                    ));
                 }
                 TouchPhase::Moved if *touch_ui_id == Some(touch.id) => {
                     ios_touch_event_this_frame = true;
                     hover.0 = script.mouse_move(x, y)
                         .filter(|id| !script.is_world_frame(*id));
+
+                    if let Some((started_at, start_raw, start_ui, _, left_down, right_down, eligible)) =
+                        *touch_ui_state
+                    {
+                        let crossed_drag_threshold =
+                            touch_look_started_drag(start_raw, raw_position);
+                        let eligible = eligible && !crossed_drag_threshold;
+                        let mut left_down = left_down;
+                        if crossed_drag_threshold && !left_down && !right_down {
+                            script.mouse_button(start_ui.x, start_ui.y, "LeftButton", true);
+                            left_down = true;
+                        }
+                        *touch_ui_state = Some((
+                            started_at,
+                            start_raw,
+                            start_ui,
+                            Vec2::new(x, y),
+                            left_down,
+                            right_down,
+                            eligible,
+                        ));
+                    }
                 }
                 TouchPhase::Ended | TouchPhase::Canceled
                     if *touch_move_id == Some(touch.id) =>
@@ -313,20 +384,61 @@ pub(super) fn feed_ui_input(
                     ios_touch_event_this_frame = true;
                     hover.0 = script.mouse_move(x, y)
                         .filter(|id| !script.is_world_frame(*id));
-                    script.mouse_button(x, y, "LeftButton", false);
+
+                    let state = *touch_ui_state;
+                    let left_down = state.is_some_and(|s| s.4);
+                    let right_down = state.is_some_and(|s| s.5);
+                    if matches!(touch.phase, TouchPhase::Ended) {
+                        if right_down {
+                            script.mouse_button(x, y, "RightButton", false);
+                        } else if left_down {
+                            script.mouse_button(x, y, "LeftButton", false);
+                        } else {
+                            let long_press = state.is_some_and(|s| {
+                                s.6 && time.elapsed_secs() - s.0 >= IOS_UI_LONG_PRESS_SECS
+                            });
+                            if long_press {
+                                script.mouse_button(x, y, "RightButton", true);
+                                script.mouse_button(x, y, "RightButton", false);
+                            } else {
+                                // A stationary short touch is a normal click.
+                                script.mouse_button(x, y, "LeftButton", true);
+                                script.mouse_button(x, y, "LeftButton", false);
+                            }
+                        }
+                    } else {
+                        // A canceled touch releases an in-progress UI drag/long-press but never
+                        // synthesizes a click.
+                        if right_down {
+                            script.mouse_button(x, y, "RightButton", false);
+                        } else if left_down {
+                            script.mouse_button(x, y, "LeftButton", false);
+                        }
+                    }
+                    *touch_ui_state = None;
                     *touch_ui_id = None;
                 }
                 TouchPhase::Ended
                     if touch_look.as_ref().map(|state| state.0) == Some(touch.id) =>
                 {
                     ios_touch_event_this_frame = true;
-                    let (_, _, _, dragging) = *touch_look.as_ref().unwrap();
-                    if !dragging {
-                        // It was a tap, not a drag: preserve the existing world click behavior.
-                        hover.0 = script.mouse_move(x, y)
-                            .filter(|id| !script.is_world_frame(*id));
-                        script.mouse_button(x, y, "LeftButton", true);
-                        script.mouse_button(x, y, "LeftButton", false);
+                    let (_, _, _, dragging, started_at, right_down) = *touch_look.as_ref().unwrap();
+                    hover.0 = script.mouse_move(x, y)
+                        .filter(|id| !script.is_world_frame(*id));
+                    *touch_world_position = Some(Vec2::new(x, y));
+
+                    if right_down {
+                        // Long-press right is already down; release it next frame so the normal
+                        // world-click router sees both button edges.
+                        *touch_world_release = Some(MouseButton::Right);
+                    } else if !dragging {
+                        if time.elapsed_secs() - started_at >= IOS_WORLD_LONG_PRESS_SECS {
+                            buttons.press(MouseButton::Right);
+                            *touch_world_release = Some(MouseButton::Right);
+                        } else {
+                            buttons.press(MouseButton::Left);
+                            *touch_world_release = Some(MouseButton::Left);
+                        }
                     }
                     *touch_look = None;
                     gamepad.touch_look_active = false;
@@ -335,11 +447,52 @@ pub(super) fn feed_ui_input(
                     if touch_look.as_ref().map(|state| state.0) == Some(touch.id) =>
                 {
                     ios_touch_event_this_frame = true;
+                    if touch_look.as_ref().is_some_and(|state| state.5) {
+                        *touch_world_position = Some(Vec2::new(x, y));
+                        *touch_world_release = Some(MouseButton::Right);
+                    }
                     *touch_look = None;
                     gamepad.touch_look_active = false;
                 }
                 _ => {}
             }
+            }
+        }
+
+        // Long-press timers are evaluated every frame, even while the finger is stationary and
+        // iOS emits no TouchMoved event. UI gestures use their own longer threshold; the reserved
+        // movement-stick zone never creates either timer.
+        if let Some((started_at, start_raw, start_ui, last_ui, left_down, right_down, eligible)) =
+            *touch_ui_state
+        {
+            if touch_ui_id.is_some()
+                && eligible
+                && !left_down
+                && !right_down
+                && time.elapsed_secs() - started_at >= IOS_UI_LONG_PRESS_SECS
+            {
+                script.mouse_button(last_ui.x, last_ui.y, "RightButton", true);
+                *touch_ui_state = Some((
+                    started_at,
+                    start_raw,
+                    start_ui,
+                    last_ui,
+                    false,
+                    true,
+                    eligible,
+                ));
+                ios_touch_event_this_frame = true;
+            }
+        }
+
+        if let Some((id, start, previous, dragging, started_at, right_down)) = *touch_look {
+            if !dragging
+                && !right_down
+                && time.elapsed_secs() - started_at >= IOS_WORLD_LONG_PRESS_SECS
+            {
+                buttons.press(MouseButton::Right);
+                *touch_look = Some((id, start, previous, dragging, started_at, true));
+                ios_touch_event_this_frame = true;
             }
         }
     }
@@ -480,8 +633,31 @@ pub(super) fn feed_ui_input(
             gamepad.virtual_mouse_right_down = false;
         }
 
-        virtual_cursor.position = None;
-        virtual_cursor.active = false;
+        #[cfg(target_os = "ios")]
+        {
+            // A live world touch, or its one-frame delayed button release, temporarily supplies a
+            // per-instance world cursor so hover and the press-pick ray use the finger's position.
+            let preserve_touch_cursor = touch_look.is_some()
+                || touch_world_release.is_some()
+                || touch_world_release_on_this_frame.is_some();
+            if preserve_touch_cursor {
+                if let Some(position) = *touch_world_position {
+                    virtual_cursor.position = Some(position);
+                    virtual_cursor.active = true;
+                } else {
+                    virtual_cursor.position = None;
+                    virtual_cursor.active = false;
+                }
+            } else {
+                virtual_cursor.position = None;
+                virtual_cursor.active = false;
+            }
+        }
+        #[cfg(not(target_os = "ios"))]
+        {
+            virtual_cursor.position = None;
+            virtual_cursor.active = false;
+        }
 
         // Keep virtual_mouse_x/y and initialized state.
         //

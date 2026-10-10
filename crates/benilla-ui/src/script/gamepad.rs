@@ -105,5 +105,34 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         })?,
     )?;
 
+    g.set(
+        "Gamepad_GetTouchStickValue",
+        lua.create_function(|lua, key: String| {
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            Ok(match key.as_str() {
+                "X" => model.touch_stick_center_x,
+                "Y" => model.touch_stick_center_y,
+                "Radius" => model.touch_stick_radius,
+                _ => 0.0,
+            })
+        })?,
+    )?;
+
+    g.set(
+        "Gamepad_IsTouchStickEnabled",
+        lua.create_function(|lua, ()| {
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            Ok(model.touch_stick_enabled)
+        })?,
+    )?;
+
+    g.set(
+        "Gamepad_IsTouchStickUnlocked",
+        lua.create_function(|lua, ()| {
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            Ok(model.touch_stick_unlocked)
+        })?,
+    )?;
+
     Ok(())
 }

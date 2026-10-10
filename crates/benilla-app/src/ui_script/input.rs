@@ -185,12 +185,26 @@ pub(super) fn feed_ui_input(
     #[cfg(target_os = "ios")]
     {
         use bevy::input::touch::TouchPhase;
-        let (stick_x, stick_y, stick_radius, stick_enabled, stick_unlocked) =
-            script.eval::<(f32, f32, f32, bool, bool)>(
-                "return Gamepad_GetTouchStick()"
-            ).unwrap_or((132.0, 136.0, 96.0, true, false));
+        let touch_events = touches.read();
+        if !touch_events.is_empty() {
+            // eval::<T> reads one return value, so retrieve the saved stick config as scalar values.
+            let stick_x = script.eval::<f32>(
+                "return Gamepad_GetTouchStickValue('X')"
+            ).unwrap_or(132.0);
+            let stick_y = script.eval::<f32>(
+                "return Gamepad_GetTouchStickValue('Y')"
+            ).unwrap_or(136.0);
+            let stick_radius = script.eval::<f32>(
+                "return Gamepad_GetTouchStickValue('Radius')"
+            ).unwrap_or(96.0);
+            let stick_enabled = script.eval::<bool>(
+                "return Gamepad_IsTouchStickEnabled()"
+            ).unwrap_or(true);
+            let stick_unlocked = script.eval::<bool>(
+                "return Gamepad_IsTouchStickUnlocked()"
+            ).unwrap_or(false);
 
-        for touch in touches.read() {
+            for touch in touch_events {
             let s = super::seam_scale(window.height(), ui_scale.0);
             let (x, y) = (touch.position.x / s, (window.height() - touch.position.y) / s);
 
@@ -257,6 +271,7 @@ pub(super) fn feed_ui_input(
                     *touch_ui_id = None;
                 }
                 _ => {}
+            }
             }
         }
     }

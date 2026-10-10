@@ -257,33 +257,29 @@ touchStick:SetMovable(1)
 touchStick:RegisterForDrag("LeftButton")
 
 local stickBackground = touchStick:CreateTexture("BenillaMobileTouchStickBackground", "BACKGROUND")
-stickBackground:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
-stickBackground:SetVertexColor(0.18, 0.24, 0.32)
-stickBackground:SetAlpha(0.68)
+stickBackground:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
+stickBackground:SetVertexColor(0.16, 0.28, 0.42)
+stickBackground:SetAlpha(0.72)
 stickBackground:SetAllPoints(touchStick)
-
-local stickBorder = touchStick:CreateTexture("BenillaMobileTouchStickBorder", "OVERLAY")
-stickBorder:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
-stickBorder:SetAlpha(0.90)
-stickBorder:SetAllPoints(touchStick)
 
 local touchStickThumb = CreateFrame("Frame", "BenillaMobileTouchStickThumb", touchStick)
 touchStickThumb:SetWidth(TOUCH_STICK_THUMB_SIZE)
 touchStickThumb:SetHeight(TOUCH_STICK_THUMB_SIZE)
 touchStickThumb:EnableMouse(false)
 local thumbTexture = touchStickThumb:CreateTexture("BenillaMobileTouchStickThumbTexture", "ARTWORK")
-thumbTexture:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
-thumbTexture:SetVertexColor(0.34, 0.48, 0.68)
-thumbTexture:SetAlpha(0.95)
+thumbTexture:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
+thumbTexture:SetVertexColor(0.82, 0.92, 1.0)
+thumbTexture:SetAlpha(1.0)
 thumbTexture:SetAllPoints(touchStickThumb)
-touchStickThumb:SetPoint("CENTER", touchStick, "CENTER", 0, 0)
 
--- Use circular artwork rather than the asymmetric square quickslot frame.
-local thumbBorder = touchStickThumb:CreateTexture("BenillaMobileTouchStickThumbBorder", "OVERLAY")
-thumbBorder:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
-thumbBorder:SetVertexColor(0.78, 0.90, 1.0)
-thumbBorder:SetAlpha(1.0)
-thumbBorder:SetAllPoints(touchStickThumb)
+-- Anchor via BOTTOMLEFT coordinates explicitly; avoids visual drift from center-point anchors.
+touchStickThumb:SetPoint(
+    "BOTTOMLEFT",
+    touchStick,
+    "BOTTOMLEFT",
+    TOUCH_STICK_THUMB_OFFSET,
+    TOUCH_STICK_THUMB_OFFSET
+)
 
 local function PositionTouchStick()
     touchStick:ClearAllPoints()
@@ -719,11 +715,11 @@ updateFrame:SetScript("OnUpdate", function()
         -- Force the nub back to the exact frame center whenever no finger owns the stick.
         touchStickThumb:ClearAllPoints()
         touchStickThumb:SetPoint(
-            "CENTER",
+            "BOTTOMLEFT",
             touchStick,
-            "CENTER",
-            x * TOUCH_STICK_THUMB_TRAVEL,
-            y * TOUCH_STICK_THUMB_TRAVEL
+            "BOTTOMLEFT",
+            TOUCH_STICK_THUMB_OFFSET + x * TOUCH_STICK_THUMB_TRAVEL,
+            TOUCH_STICK_THUMB_OFFSET + y * TOUCH_STICK_THUMB_TRAVEL
         )
     end
 

@@ -25,7 +25,7 @@ local DEFAULT_TOUCH_STICK_X = 132
 local DEFAULT_TOUCH_STICK_Y = 136
 local TOUCH_STICK_RADIUS = 96
 local TOUCH_STICK_THUMB_SIZE = 66
-local TOUCH_STICK_THUMB_TRAVEL = 48
+local TOUCH_STICK_THUMB_TRAVEL = TOUCH_STICK_RADIUS - TOUCH_STICK_THUMB_SIZE / 2
 
 local RANGE_COLOR_R = 1.0
 local RANGE_COLOR_G = 0.10
@@ -272,16 +272,17 @@ touchStickThumb:SetWidth(TOUCH_STICK_THUMB_SIZE)
 touchStickThumb:SetHeight(TOUCH_STICK_THUMB_SIZE)
 touchStickThumb:EnableMouse(false)
 local thumbTexture = touchStickThumb:CreateTexture("BenillaMobileTouchStickThumbTexture", "ARTWORK")
-thumbTexture:SetTexture("Interface\\Buttons\\UI-Quickslot2")
-thumbTexture:SetVertexColor(0.80, 0.88, 1.0)
-thumbTexture:SetAlpha(1.0)
+thumbTexture:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
+thumbTexture:SetVertexColor(0.34, 0.48, 0.68)
+thumbTexture:SetAlpha(0.95)
 thumbTexture:SetAllPoints(touchStickThumb)
 touchStickThumb:SetPoint("CENTER", touchStick, "CENTER", 0, 0)
 
--- A round rim helps the larger thumb read as a circular control even though Quickslot2 is bevelled.
+-- Use circular artwork rather than the asymmetric square quickslot frame.
 local thumbBorder = touchStickThumb:CreateTexture("BenillaMobileTouchStickThumbBorder", "OVERLAY")
 thumbBorder:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
-thumbBorder:SetAlpha(0.95)
+thumbBorder:SetVertexColor(0.78, 0.90, 1.0)
+thumbBorder:SetAlpha(1.0)
 thumbBorder:SetAllPoints(touchStickThumb)
 
 local function PositionTouchStick()
@@ -301,6 +302,7 @@ local function SyncTouchStickConfig()
             BenillaMobileDB.touchStickX,
             BenillaMobileDB.touchStickY,
             TOUCH_STICK_RADIUS,
+            TOUCH_STICK_THUMB_TRAVEL,
             BenillaMobileDB.touchStickEnabled,
             BenillaMobileDB.touchStickUnlocked
         )
@@ -704,9 +706,17 @@ local shown = nil
 
 local updateFrame = CreateFrame("Frame", "BenillaMobileUpdateFrame", UIParent)
 updateFrame:SetScript("OnUpdate", function()
-    if touchStick:IsShown() and type(Gamepad_GetAxis) == "function" then
-        local x = Gamepad_GetAxis("TouchMoveX") or 0
-        local y = Gamepad_GetAxis("TouchMoveY") or 0
+    if touchStick:IsShown() then
+        local moving = type(Gamepad_IsTouchStickActive) == "function"
+            and Gamepad_IsTouchStickActive()
+        local x = 0
+        local y = 0
+        if moving and type(Gamepad_GetAxis) == "function" then
+            x = Gamepad_GetAxis("TouchMoveX") or 0
+            y = Gamepad_GetAxis("TouchMoveY") or 0
+        end
+
+        -- Force the nub back to the exact frame center whenever no finger owns the stick.
         touchStickThumb:ClearAllPoints()
         touchStickThumb:SetPoint(
             "CENTER",

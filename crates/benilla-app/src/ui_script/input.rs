@@ -32,9 +32,10 @@ fn touch_stick_axes(
     y: f32,
     center_x: f32,
     center_y: f32,
-    radius: f32,
+    travel: f32,
 ) -> Vec2 {
-    Vec2::new((x - center_x) / radius, (y - center_y) / radius)
+    // The input's full-scale travel must match the visual thumb center's allowed displacement.
+    Vec2::new((x - center_x) / travel, (y - center_y) / travel)
         .clamp_length_max(1.0)
 }
 
@@ -197,6 +198,9 @@ pub(super) fn feed_ui_input(
             let stick_radius = script.eval::<f32>(
                 "return Gamepad_GetTouchStickValue('Radius')"
             ).unwrap_or(96.0);
+            let stick_travel = script.eval::<f32>(
+                "return Gamepad_GetTouchStickValue('Travel')"
+            ).unwrap_or(63.0);
             let stick_enabled = script.eval::<bool>(
                 "return Gamepad_IsTouchStickEnabled()"
             ).unwrap_or(true);
@@ -240,7 +244,7 @@ pub(super) fn feed_ui_input(
                         *touch_move_id = Some(touch.id);
                         gamepad.touch_move_active = true;
                         gamepad.touch_move_stick =
-                            touch_stick_axes(x, y, stick_x, stick_y, stick_radius);
+                            touch_stick_axes(x, y, stick_x, stick_y, stick_travel);
                         hover.0 = None;
                     } else if can_route_ui {
                         *touch_ui_id = Some(touch.id);
@@ -251,7 +255,7 @@ pub(super) fn feed_ui_input(
                 TouchPhase::Moved if *touch_move_id == Some(touch.id) => {
                     ios_touch_event_this_frame = true;
                     gamepad.touch_move_stick =
-                        touch_stick_axes(x, y, stick_x, stick_y, stick_radius);
+                        touch_stick_axes(x, y, stick_x, stick_y, stick_travel);
                 }
                 TouchPhase::Moved if *touch_ui_id == Some(touch.id) => {
                     ios_touch_event_this_frame = true;
@@ -693,14 +697,21 @@ mod touch_stick_tests {
 
     #[test]
     fn touch_stick_center_and_cardinal_axes_follow_saved_geometry() {
-        let (cx, cy, radius) = (132.0, 136.0, 96.0);
-        assert!(touch_stick_contains(cx, cy, cx, cy, radius));
-        assert!(!touch_stick_contains(cx + radius + 1.0, cy, cx, cy, radius));
-        assert_eq!(touch_stick_axes(cx, cy, cx, cy, radius), Vec2::ZERO);
-        assert_eq!(touch_stick_axes(cx, cy + radius, cx, cy, radius), Vec2::Y);
-        assert_eq!(touch_stick_axes(cx + radius, cy, cx, cy, radius), Vec2::X);
+        let (cx, cy, hit_radius, travel) = (132.0, 136.0, 96.0, 63.0);
+        assert!(touch_stick_contains(cx, cy, cx, cy, hit_radius));
+        assert!(!touch_stick_contains(cx + hit_radius + 1.0, cy, cx, cy, hit_radius));
+        assert_eq!(touch_stick_axes(cx, cy, cx, cy, travel), Vec2::ZERO);
 
-        let diagonal = touch_stick_axes(cx + radius, cy + radius, cx, cy, radius);
+        // The displayed nub offset is inverse-mapped to exactly the same finger offset.
+        let finger_delta = 40.0;
+        let axis = touch_stick_axes(cx + finger_delta, cy, cx, cy, travel);
+        assert!((axis.x * travel - finger_delta).abs() < 0.001);
+
+        assert_eq!(touch_stick_axes(cx, cy + travel, cx, cy, travel), Vec2::Y);
+        assert_eq!(touch_stick_axes(cx + travel, cy, cx, cy, travel), Vec2::X);
+        assert_eq!(touch_stick_axes(cx + hit_radius, cy, cx, cy, travel), Vec2::X);
+
+        let diagonal = touch_stick_axes(cx + travel, cy + travel, cx, cy, travel);
         assert!(diagonal.length() <= 1.00001);
     }
 }

@@ -201,6 +201,7 @@ impl GamepadState {
             right_y: self.look_stick.y,
             touch_move_x: self.touch_move_stick.x,
             touch_move_y: self.touch_move_stick.y,
+            touch_move_active: self.touch_move_active,
         }
     }
 }

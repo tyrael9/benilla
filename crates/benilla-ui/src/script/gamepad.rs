@@ -72,8 +72,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "Gamepad_SetTouchStick",
         lua.create_function(
-            |lua, (center_x, center_y, radius, enabled, unlocked):
-                (f32, f32, f32, bool, bool)| {
+            |lua, (center_x, center_y, radius, travel, enabled, unlocked):
+                (f32, f32, f32, f32, bool, bool)| {
                 let mut model = lua.app_data_mut::<Model>().expect("model app_data");
                 if center_x.is_finite() {
                     model.touch_stick_center_x = center_x;
@@ -83,6 +83,9 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 }
                 if radius.is_finite() {
                     model.touch_stick_radius = radius.clamp(48.0, 180.0);
+                }
+                if travel.is_finite() {
+                    model.touch_stick_travel = travel.clamp(24.0, 160.0);
                 }
                 model.touch_stick_enabled = enabled;
                 model.touch_stick_unlocked = unlocked;
@@ -113,6 +116,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                 "X" => model.touch_stick_center_x,
                 "Y" => model.touch_stick_center_y,
                 "Radius" => model.touch_stick_radius,
+                "Travel" => model.touch_stick_travel,
                 _ => 0.0,
             })
         })?,
@@ -131,6 +135,14 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
         lua.create_function(|lua, ()| {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             Ok(model.touch_stick_unlocked)
+        })?,
+    )?;
+
+    g.set(
+        "Gamepad_IsTouchStickActive",
+        lua.create_function(|lua, ()| {
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            Ok(model.gamepad.touch_move_active)
         })?,
     )?;
 

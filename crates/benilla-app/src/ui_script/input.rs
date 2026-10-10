@@ -697,7 +697,7 @@ mod touch_stick_tests {
 
     #[test]
     fn touch_stick_center_and_cardinal_axes_follow_saved_geometry() {
-        let (cx, cy, hit_radius, travel) = (132.0, 136.0, 96.0, 63.0);
+        let (cx, cy, hit_radius, travel) = (132.0, 136.0, 112.0, 73.0);
         assert!(touch_stick_contains(cx, cy, cx, cy, hit_radius));
         assert!(!touch_stick_contains(cx + hit_radius + 1.0, cy, cx, cy, hit_radius));
         assert_eq!(touch_stick_axes(cx, cy, cx, cy, travel), Vec2::ZERO);

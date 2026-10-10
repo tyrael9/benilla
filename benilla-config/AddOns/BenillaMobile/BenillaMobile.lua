@@ -23,8 +23,8 @@ local DEFAULT_Y = 18
 -- Touch-stick geometry uses the same UI coordinate system as the core's touch hit-test.
 local DEFAULT_TOUCH_STICK_X = 132
 local DEFAULT_TOUCH_STICK_Y = 136
-local TOUCH_STICK_RADIUS = 96
-local TOUCH_STICK_THUMB_SIZE = 66
+local TOUCH_STICK_RADIUS = 112
+local TOUCH_STICK_THUMB_SIZE = 78
 local TOUCH_STICK_THUMB_TRAVEL = TOUCH_STICK_RADIUS - TOUCH_STICK_THUMB_SIZE / 2
 -- Inset from the base's bottom-left to the thumb's bottom-left when centered.
 local TOUCH_STICK_THUMB_OFFSET = TOUCH_STICK_THUMB_TRAVEL
@@ -251,6 +251,8 @@ local function IsTouchDevice()
         and Gamepad_IsTouchDevice()
 end
 
+local STICK_TEXTURE = "Interface\\Minimap\\UI-Minimap-Background"
+
 local touchStick = CreateFrame("Frame", "BenillaMobileTouchStick", UIParent)
 touchStick:SetWidth(TOUCH_STICK_RADIUS * 2)
 touchStick:SetHeight(TOUCH_STICK_RADIUS * 2)
@@ -258,23 +260,42 @@ touchStick:SetFrameStrata("MEDIUM")
 touchStick:SetMovable(1)
 touchStick:RegisterForDrag("LeftButton")
 
+-- Circular base with a darker inset gives it a beveled, recessed look.
+-- Avoid the asymmetric tracking-border atlas art, which looked off-center when reused here.
 local stickBackground = touchStick:CreateTexture("BenillaMobileTouchStickBackground", "BACKGROUND")
-stickBackground:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
-stickBackground:SetVertexColor(0.16, 0.28, 0.42)
-stickBackground:SetAlpha(0.72)
+stickBackground:SetTexture(STICK_TEXTURE)
+stickBackground:SetVertexColor(0.26, 0.43, 0.62)
+stickBackground:SetAlpha(0.92)
 stickBackground:SetAllPoints(touchStick)
+
+local stickInner = touchStick:CreateTexture("BenillaMobileTouchStickInner", "BORDER")
+stickInner:SetTexture(STICK_TEXTURE)
+stickInner:SetVertexColor(0.035, 0.07, 0.12)
+stickInner:SetAlpha(0.96)
+stickInner:SetWidth(TOUCH_STICK_RADIUS * 2 - 18)
+stickInner:SetHeight(TOUCH_STICK_RADIUS * 2 - 18)
+stickInner:SetPoint("CENTER", touchStick, "CENTER", 0, 0)
 
 local touchStickThumb = CreateFrame("Frame", "BenillaMobileTouchStickThumb", touchStick)
 touchStickThumb:SetWidth(TOUCH_STICK_THUMB_SIZE)
 touchStickThumb:SetHeight(TOUCH_STICK_THUMB_SIZE)
 touchStickThumb:EnableMouse(false)
+
 local thumbTexture = touchStickThumb:CreateTexture("BenillaMobileTouchStickThumbTexture", "ARTWORK")
-thumbTexture:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
-thumbTexture:SetVertexColor(0.82, 0.92, 1.0)
+thumbTexture:SetTexture(STICK_TEXTURE)
+thumbTexture:SetVertexColor(0.62, 0.80, 0.96)
 thumbTexture:SetAlpha(1.0)
 thumbTexture:SetAllPoints(touchStickThumb)
 
--- Anchor via BOTTOMLEFT coordinates explicitly; avoids visual drift from center-point anchors.
+local thumbInner = touchStickThumb:CreateTexture("BenillaMobileTouchStickThumbInner", "OVERLAY")
+thumbInner:SetTexture(STICK_TEXTURE)
+thumbInner:SetVertexColor(0.10, 0.20, 0.33)
+thumbInner:SetAlpha(1.0)
+thumbInner:SetWidth(TOUCH_STICK_THUMB_SIZE - 14)
+thumbInner:SetHeight(TOUCH_STICK_THUMB_SIZE - 14)
+thumbInner:SetPoint("CENTER", touchStickThumb, "CENTER", 0, 0)
+
+-- Anchor via BOTTOMLEFT coordinates explicitly; the thumb's inset is equal on both axes.
 touchStickThumb:SetPoint(
     "BOTTOMLEFT",
     touchStick,
@@ -284,6 +305,14 @@ touchStickThumb:SetPoint(
 )
 
 local function PositionTouchStick()
+    -- Keep the larger base fully visible, including when upgrading older saved positions.
+    local minX = TOUCH_STICK_RADIUS + 8
+    local maxX = math.max(minX, UIParent:GetWidth() - TOUCH_STICK_RADIUS - 8)
+    local minY = TOUCH_STICK_RADIUS + 8
+    local maxY = math.max(minY, UIParent:GetHeight() - TOUCH_STICK_RADIUS - 8)
+    BenillaMobileDB.touchStickX = math.max(minX, math.min(maxX, BenillaMobileDB.touchStickX))
+    BenillaMobileDB.touchStickY = math.max(minY, math.min(maxY, BenillaMobileDB.touchStickY))
+
     touchStick:ClearAllPoints()
     touchStick:SetPoint(
         "BOTTOMLEFT",

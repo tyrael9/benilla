@@ -1513,8 +1513,8 @@ impl Model {
             gamepad: GamepadLuaState::default(),
             touch_stick_center_x: 132.0,
             touch_stick_center_y: 136.0,
-            touch_stick_radius: 96.0,
-            touch_stick_travel: 63.0,
+            touch_stick_radius: 112.0,
+            touch_stick_travel: 73.0,
             touch_stick_enabled: true,
             touch_stick_unlocked: false,
         }

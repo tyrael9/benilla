@@ -45,6 +45,19 @@ fn touch_look_started_drag(start: Vec2, current: Vec2) -> bool {
     start.distance_squared(current) >= 64.0
 }
 
+/// The iOS-only gesture state grouped into one Bevy Local so this input system stays within the
+/// system-parameter arity limit. Other platforms leave these fields at their defaults.
+#[allow(dead_code)]
+#[derive(Default)]
+struct IosTouchState {
+    touch_ui_id: Option<u64>,
+    touch_move_id: Option<u64>,
+    touch_ui_state: Option<(f32, Vec2, Vec2, Vec2, bool, bool, bool)>,
+    touch_look: Option<(u64, Vec2, Vec2, bool, f32, bool)>,
+    touch_world_position: Option<Vec2>,
+    touch_world_release: Option<MouseButton>,
+}
+
 /// The pointer-side state [`feed_ui_input`] reads and writes. The world pick reads last frame's
 /// hover and occlusion ray, since the target chain runs after this pass; one frame of staleness is
 /// within the pick's tolerance.
@@ -134,20 +147,19 @@ pub(super) fn feed_ui_input(
     mut virtual_mouse_buttons: ResMut<crate::cursor::VirtualMouseButtons>,
     // iOS has touch input rather than a conventional OS mouse pointer.
     mut touches: MessageReader<bevy::input::touch::TouchInput>,
-    // One touch is routed through WoW's single-pointer UI model; a separate finger can own
-    // the virtual movement stick without moving that UI pointer.
-    mut touch_ui_id: Local<Option<u64>>,
-    mut touch_move_id: Local<Option<u64>>,
-    // (start time, start raw position, start UI position, last UI position,
-    //  left drag active, long-press right active, long-press still eligible)
-    mut touch_ui_state: Local<Option<(f32, Vec2, Vec2, Vec2, bool, bool, bool)>>,
-    // (touch id, start raw position, previous raw position, dragging, start time, right active)
-    mut touch_look: Local<Option<(u64, Vec2, Vec2, bool, f32, bool)>>,
-    // The iOS touch position drives the world's pick ray while the OS has no mouse cursor.
-    mut touch_world_position: Local<Option<Vec2>>,
-    // Release world-touch buttons one frame after press so Bevy preserves the down edge.
-    mut touch_world_release: Local<Option<MouseButton>>,
+    // One Local groups iOS's gesture ownership, drag state, cursor position and delayed release.
+    mut ios_touch_state: Local<IosTouchState>,
 ) {
+    #[cfg(target_os = "ios")]
+    let IosTouchState {
+        touch_ui_id,
+        touch_move_id,
+        touch_ui_state,
+        touch_look,
+        touch_world_position,
+        touch_world_release,
+    } = &mut *ios_touch_state;
+
     const GAMEPAD_MOUSE_SPEED: f32 = 700.0;
 
     // A touch click's release must occur on the next update, not in the same update as its press:

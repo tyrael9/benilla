@@ -292,6 +292,12 @@ fn gamepad_debug_enabled() -> bool {
 }
 
 #[cfg(target_os = "ios")]
+fn ios_diagnostics_enabled() -> bool {
+    // The on-screen diagnostics are opt-in; leave ordinary iOS builds uncluttered.
+    std::env::var("BENILLA_IOS_DIAGNOSTICS").as_deref() == Ok("1")
+}
+
+#[cfg(target_os = "ios")]
 #[derive(Component)]
 struct IosDiagnosticsText;
 
@@ -436,8 +442,14 @@ impl Plugin for GamepadPlugin {
 
         #[cfg(target_os = "ios")]
         app.init_resource::<IosDiagnosticsFps>()
-            .add_systems(Startup, setup_ios_diagnostics)
-            .add_systems(Update, update_ios_diagnostics);
+            .add_systems(
+                Startup,
+                setup_ios_diagnostics.run_if(ios_diagnostics_enabled),
+            )
+            .add_systems(
+                Update,
+                update_ios_diagnostics.run_if(ios_diagnostics_enabled),
+            );
     }
 }
 

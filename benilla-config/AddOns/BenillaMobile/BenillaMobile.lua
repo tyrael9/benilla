@@ -385,7 +385,7 @@ local function CreateMobileButton(index)
         bar,
         "BOTTOMLEFT",
         column * (ButtonSize() + BUTTON_SPACING),
-        row * (ButtonSize() + BUTTON_SPACING)
+        (GRID_ROWS - 1 - row) * (ButtonSize() + BUTTON_SPACING)
     )
 
     local button = CreateFrame(
@@ -634,7 +634,7 @@ local function ResizeButtons()
             bar,
             "BOTTOMLEFT",
             column * (size + BUTTON_SPACING),
-            row * (size + BUTTON_SPACING)
+            (GRID_ROWS - 1 - row) * (size + BUTTON_SPACING)
         )
 
         button:SetWidth(BASE_BUTTON_SIZE)

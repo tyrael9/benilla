@@ -428,9 +428,7 @@ pub(super) fn feed_ui_input(
                     *touch_world_position = Some(Vec2::new(x, y));
 
                     if right_down {
-                        // Long-press right is already down; release it next frame so the normal
-                        // world-click router sees both button edges.
-                        *touch_world_release = Some(MouseButton::Right);
+                        // The long-press right click was already emitted at the threshold.
                     } else if !dragging {
                         if time.elapsed_secs() - started_at >= IOS_WORLD_LONG_PRESS_SECS {
                             buttons.press(MouseButton::Right);
@@ -449,7 +447,7 @@ pub(super) fn feed_ui_input(
                     ios_touch_event_this_frame = true;
                     if touch_look.as_ref().is_some_and(|state| state.5) {
                         *touch_world_position = Some(Vec2::new(x, y));
-                        *touch_world_release = Some(MouseButton::Right);
+                        // The long-press path schedules its release as soon as the click begins.
                     }
                     *touch_look = None;
                     gamepad.touch_look_active = false;
@@ -491,6 +489,9 @@ pub(super) fn feed_ui_input(
                 && time.elapsed_secs() - started_at >= IOS_WORLD_LONG_PRESS_SECS
             {
                 buttons.press(MouseButton::Right);
+                // Make the long-press a discrete click even if the finger stays down longer:
+                // the normal world click predicate measures duration from this synthetic press.
+                *touch_world_release = Some(MouseButton::Right);
                 *touch_look = Some((id, start, previous, dragging, started_at, true));
                 ios_touch_event_this_frame = true;
             }

@@ -26,6 +26,8 @@ local DEFAULT_TOUCH_STICK_Y = 136
 local TOUCH_STICK_RADIUS = 96
 local TOUCH_STICK_THUMB_SIZE = 66
 local TOUCH_STICK_THUMB_TRAVEL = TOUCH_STICK_RADIUS - TOUCH_STICK_THUMB_SIZE / 2
+-- Inset from the base's bottom-left to the thumb's bottom-left when centered.
+local TOUCH_STICK_THUMB_OFFSET = TOUCH_STICK_THUMB_TRAVEL
 
 local RANGE_COLOR_R = 1.0
 local RANGE_COLOR_G = 0.10

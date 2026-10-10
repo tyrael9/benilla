@@ -880,6 +880,8 @@ pub(crate) struct CameraPivot {
 pub(super) fn run_look_session(
     mouse_motion: &AccumulatedMouseMotion,
     gamepad_look: Vec2,
+    touch_look_delta: Vec2,
+    touch_look_active: bool,
     both_buttons: bool,
     rig: &mut CameraControl,
     cam: &mut FlyCam,
@@ -904,11 +906,13 @@ pub(super) fn run_look_session(
 ) {
     // The mouse moves the view only through a held cursor: motion while unfocused, or on the frame
     // that takes the cursor back, is the pointer travelling in another app.
-    let motion = if sync_look_focus(rig, focused, window, cursor_opts) {
+    let mouse_delta = if sync_look_focus(rig, focused, window, cursor_opts) {
         mouse_motion.delta
     } else {
         Vec2::ZERO
     };
+    // Touch drags are already captured in screen-pixel units; they must not lock or warp the OS cursor.
+    let motion = mouse_delta + touch_look_delta;
 
     const GAMEPAD_LOOK_SPEED: f32 = 6.0;
     let gamepad_motion = gamepad_look * GAMEPAD_LOOK_SPEED;
@@ -988,7 +992,11 @@ pub(super) fn run_look_session(
     }
 
     // Look rotation; a right-drag also turns the character.
-    if rig.look.is_some() || gamepad_look != Vec2::ZERO {
+    if rig.look.is_some()
+        || gamepad_look != Vec2::ZERO
+        || touch_look_active
+        || touch_look_delta != Vec2::ZERO
+    {
         let delta = motion + gamepad_motion;
         let d_yaw = -delta.x * yaw_rate;
         cam.yaw += d_yaw;
@@ -1016,10 +1024,14 @@ pub(super) fn run_look_session(
                 *face_yaw = cam.yaw;
             }
         }
+        if touch_look_active {
+            *face_yaw = cam.yaw;
+        }
     }
-    // Freelook is right-held mouse-look or a both-button run, which steers like it; a left-drag
-    // orbit is not. This test and the `face_yaw` sync above must stay alike.
-    rig.freelook = rig.look == Some(LookButton::Right) || (rig.look.is_some() && both_buttons);
+    // A touch drag uses right-look semantics without acquiring the OS cursor.
+    rig.freelook = rig.look == Some(LookButton::Right)
+        || (rig.look.is_some() && both_buttons)
+        || touch_look_active;
 }
 
 /// Start `button`'s look session: stash the cursor, then lock and hide it until the session ends,

@@ -43,6 +43,11 @@ pub(crate) struct GamepadState {
     pub touch_move_stick: Vec2,
     pub touch_move_active: bool,
 
+    /// A world-area touch drag, in the same screen-pixel delta units as MouseMotion.
+    pub touch_look_delta: Vec2,
+    /// True once a touch has crossed the drag threshold and still owns the gesture.
+    pub touch_look_active: bool,
+
     // Face buttons
     pub a: bool,
     pub b: bool,

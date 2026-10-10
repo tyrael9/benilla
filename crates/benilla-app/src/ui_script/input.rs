@@ -39,6 +39,12 @@ fn touch_stick_axes(
         .clamp_length_max(1.0)
 }
 
+#[cfg(any(target_os = "ios", test))]
+fn touch_look_started_drag(start: Vec2, current: Vec2) -> bool {
+    // Ignore touch jitter so world taps still select, while real drags rotate the camera.
+    start.distance_squared(current) >= 64.0
+}
+
 /// The pointer-side state [`feed_ui_input`] reads and writes. The world pick reads last frame's
 /// hover and occlusion ray, since the target chain runs after this pass; one frame of staleness is
 /// within the pick's tolerance.
@@ -132,6 +138,8 @@ pub(super) fn feed_ui_input(
     // the virtual movement stick without moving that UI pointer.
     mut touch_ui_id: Local<Option<u64>>,
     mut touch_move_id: Local<Option<u64>>,
+    // (touch id, start position, previous position, crossed-drag-threshold)
+    mut touch_look: Local<Option<(u64, Vec2, Vec2, bool)>>,
 ) {
     const GAMEPAD_MOUSE_SPEED: f32 = 700.0;
 
@@ -185,6 +193,9 @@ pub(super) fn feed_ui_input(
     let mut ios_touch_event_this_frame = false;
     #[cfg(target_os = "ios")]
     {
+        gamepad.touch_look_delta = Vec2::ZERO;
+        gamepad.touch_look_active = touch_look.as_ref().map(|state| state.3).unwrap_or(false);
+
         use bevy::input::touch::TouchPhase;
         let mut touch_events = touches.read().peekable();
         if touch_events.peek().is_some() {
@@ -209,8 +220,10 @@ pub(super) fn feed_ui_input(
             ).unwrap_or(false);
 
             for touch in touch_events {
+            let raw_position = touch.position;
             let s = super::seam_scale(window.height(), ui_scale.0);
             let (x, y) = (touch.position.x / s, (window.height() - touch.position.y) / s);
+            let owns_look = touch_look.as_ref().map(|state| state.0) == Some(touch.id);
 
             // Geometry and drag mode are published by BenillaMobile.
             // A UI frame (including the stick while unlocked) takes priority over movement.
@@ -229,12 +242,13 @@ pub(super) fn feed_ui_input(
                 && in_move_stick
                 && touch_move_id.is_none();
             let can_route_ui = !gamepad_mouse && touch_ui_id.is_none();
-            let hit = if can_route_ui && !claim_move {
+            // Do not move the single WoW UI pointer once a finger has been captured for camera look.
+            let hit_frame = if can_route_ui && !claim_move && !owns_look {
                 script.mouse_move(x, y)
-                    .filter(|id| !script.is_world_frame(*id))
             } else {
                 None
             };
+            let hit = hit_frame.filter(|id| !script.is_world_frame(*id));
 
             match touch.phase {
                 TouchPhase::Started => {
@@ -246,6 +260,13 @@ pub(super) fn feed_ui_input(
                         gamepad.touch_move_stick =
                             touch_stick_axes(x, y, stick_x, stick_y, stick_travel);
                         hover.0 = None;
+                    } else if can_route_ui && hit.is_none() {
+                        // Defer a world click until release: if this becomes a drag, it is camera
+                        // input instead of an accidental target click.
+                        if touch_look.is_none() {
+                            *touch_look = Some((touch.id, raw_position, raw_position, false));
+                        }
+                        hover.0 = None;
                     } else if can_route_ui {
                         *touch_ui_id = Some(touch.id);
                         hover.0 = hit;
@@ -256,6 +277,22 @@ pub(super) fn feed_ui_input(
                     ios_touch_event_this_frame = true;
                     gamepad.touch_move_stick =
                         touch_stick_axes(x, y, stick_x, stick_y, stick_travel);
+                }
+                TouchPhase::Moved
+                    if touch_look.as_ref().map(|state| state.0) == Some(touch.id) =>
+                {
+                    ios_touch_event_this_frame = true;
+                    let (_, start, previous, was_dragging) = *touch_look.as_ref().unwrap();
+                    let dragging = was_dragging || touch_look_started_drag(start, raw_position);
+                    if dragging {
+                        gamepad.touch_look_delta += if was_dragging {
+                            raw_position - previous
+                        } else {
+                            raw_position - start
+                        };
+                        gamepad.touch_look_active = true;
+                    }
+                    *touch_look = Some((touch.id, start, raw_position, dragging));
                 }
                 TouchPhase::Moved if *touch_ui_id == Some(touch.id) => {
                     ios_touch_event_this_frame = true;
@@ -278,6 +315,28 @@ pub(super) fn feed_ui_input(
                         .filter(|id| !script.is_world_frame(*id));
                     script.mouse_button(x, y, "LeftButton", false);
                     *touch_ui_id = None;
+                }
+                TouchPhase::Ended
+                    if touch_look.as_ref().map(|state| state.0) == Some(touch.id) =>
+                {
+                    ios_touch_event_this_frame = true;
+                    let (_, _, _, dragging) = *touch_look.as_ref().unwrap();
+                    if !dragging {
+                        // It was a tap, not a drag: preserve the existing world click behavior.
+                        hover.0 = script.mouse_move(x, y)
+                            .filter(|id| !script.is_world_frame(*id));
+                        script.mouse_button(x, y, "LeftButton", true);
+                        script.mouse_button(x, y, "LeftButton", false);
+                    }
+                    *touch_look = None;
+                    gamepad.touch_look_active = false;
+                }
+                TouchPhase::Canceled
+                    if touch_look.as_ref().map(|state| state.0) == Some(touch.id) =>
+                {
+                    ios_touch_event_this_frame = true;
+                    *touch_look = None;
+                    gamepad.touch_look_active = false;
                 }
                 _ => {}
             }
@@ -439,6 +498,7 @@ pub(super) fn feed_ui_input(
                     !ios_touch_event_this_frame
                         && touch_ui_id.is_none()
                         && touch_move_id.is_none()
+                        && touch_look.is_none()
                 }
                 #[cfg(not(target_os = "ios"))]
                 { true }
@@ -520,7 +580,7 @@ pub(super) fn feed_ui_input(
             );
         } else if !synthetic && {
             #[cfg(target_os = "ios")]
-            { touch_ui_id.is_none() && touch_move_id.is_none() }
+            { touch_ui_id.is_none() && touch_move_id.is_none() && touch_look.is_none() }
             #[cfg(not(target_os = "ios"))]
             { true }
         } {
@@ -694,6 +754,12 @@ pub(super) fn feed_ui_input(
 #[cfg(test)]
 mod touch_stick_tests {
     use super::*;
+
+    #[test]
+    fn world_touch_requires_a_real_drag_to_switch_from_tap_to_camera_look() {
+        assert!(!touch_look_started_drag(Vec2::ZERO, Vec2::new(3.0, 3.0)));
+        assert!(touch_look_started_drag(Vec2::ZERO, Vec2::new(8.0, 0.0)));
+    }
 
     #[test]
     fn touch_stick_center_and_cardinal_axes_follow_saved_geometry() {

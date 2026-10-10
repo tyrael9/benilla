@@ -237,6 +237,8 @@ pub(super) fn control(
         } else {
             gamepad.look_axis()
         },
+        gamepad.touch_look_delta,
+        gamepad.touch_look_active,
         both_buttons,
         &mut rig,
         &mut cam,

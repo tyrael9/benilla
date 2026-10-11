@@ -174,18 +174,19 @@ impl UiScript {
                 | crate::widget::FrameKind::Minimap
         );
         let mouse_handler = model.scripts.get(&h).is_some_and(|scripts| {
-            [
-                "OnClick",
-                "OnMouseDown",
-                "OnMouseUp",
-                "OnDoubleClick",
-                "OnDragStart",
-                "OnDragStop",
-                "OnReceiveDrag",
-                "OnHyperlinkClick",
-            ]
-            .iter()
-            .any(|handler| scripts.contains(handler))
+            scripts.iter().any(|handler| {
+                matches!(
+                    *handler,
+                    "OnClick"
+                        | "OnMouseDown"
+                        | "OnMouseUp"
+                        | "OnDoubleClick"
+                        | "OnDragStart"
+                        | "OnDragStop"
+                        | "OnReceiveDrag"
+                        | "OnHyperlinkClick"
+                )
+            })
         });
 
         control || mouse_handler

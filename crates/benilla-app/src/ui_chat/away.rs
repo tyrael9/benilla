@@ -206,6 +206,7 @@ pub(crate) fn movement_clears_afk(
 
     let gamepad_moved = gamepad.is_some_and(|g| {
         g.move_stick.length_squared() > 0.01
+            || (g.touch_move_active && g.touch_move_stick.length_squared() > 0.01)
     });
 
     let moved = keyboard_moved || gamepad_moved;

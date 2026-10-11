@@ -147,6 +147,50 @@ impl UiScript {
         model.arena.frame(fh)?.name.clone()
     }
 
+    /// Whether a touch at `(x, y)` is over a UI control that should win against the iOS
+    /// virtual movement stick. Plain mouse-enabled background frames (for example a blank panel)
+    /// remain transparent to stick ownership, while controls and frames with real mouse handlers
+    /// get the touch so fixed-position vendor/trainer windows stay usable.
+    pub fn hit_test_is_interactive(&self, x: f32, y: f32) -> bool {
+        let Some(id) = self.hit_test(x, y) else {
+            return false;
+        };
+        let model = self.model_ref();
+        let Some(&h) = model.id_to_frame.get(&id) else {
+            return false;
+        };
+        let Some(frame) = model.arena.frame(h) else {
+            return false;
+        };
+
+        let control = matches!(
+            frame.kind,
+            crate::widget::FrameKind::Button
+                | crate::widget::FrameKind::LootButton
+                | crate::widget::FrameKind::CheckButton
+                | crate::widget::FrameKind::EditBox
+                | crate::widget::FrameKind::Slider
+                | crate::widget::FrameKind::ColorSelect
+                | crate::widget::FrameKind::Minimap
+        );
+        let mouse_handler = model.scripts.get(&h).is_some_and(|scripts| {
+            [
+                "OnClick",
+                "OnMouseDown",
+                "OnMouseUp",
+                "OnDoubleClick",
+                "OnDragStart",
+                "OnDragStop",
+                "OnReceiveDrag",
+                "OnHyperlinkClick",
+            ]
+            .iter()
+            .any(|handler| scripts.contains(handler))
+        });
+
+        control || mouse_handler
+    }
+
     /// Move the cursor to `(x, y)`. When the hovered frame changes, fires `OnLeave(self, true)` on
     /// the old one if still live and `OnEnter(self, true)` on the new; a disabled Button takes the
     /// hover but fires neither ([`button::hover_notify_runs`]). Drags and frame moves advance

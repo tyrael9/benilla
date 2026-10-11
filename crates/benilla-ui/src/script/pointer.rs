@@ -163,6 +163,13 @@ impl UiScript {
             return false;
         };
 
+        // WorldFrame spans the whole viewport and has mouse handlers for camera/world clicks.
+        // It is not an overlay control: treating those handlers as UI would claim the entire
+        // screen for UI priority and starve the virtual movement stick everywhere.
+        if frame.kind == crate::widget::FrameKind::WorldFrame {
+            return false;
+        }
+
         let control = matches!(
             frame.kind,
             crate::widget::FrameKind::Button

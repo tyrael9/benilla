@@ -430,6 +430,8 @@ mod tests {
                 .add_message::<KeyboardInput>()
                 .add_message::<MouseButtonInput>()
                 .add_message::<MouseWheel>();
+            #[cfg(target_os = "ios")]
+            app.add_message::<bevy::input::touch::TouchInput>();
             app.world_mut()
                 .resource_mut::<Time<Real>>()
                 .advance_by(Duration::from_millis(1234));

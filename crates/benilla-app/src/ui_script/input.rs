@@ -269,12 +269,17 @@ pub(super) fn feed_ui_input(
                     stick_y,
                     stick_radius,
                 );
-            // The reserved movement zone must win over background UI frames (for example the
-            // chat panel). Otherwise hit-testing consumes the finger before it reaches the stick.
+            let can_route_ui = !gamepad_mouse && touch_ui_id.is_none();
+            // Fixed-position UI controls must take priority over the reserved movement-stick area:
+            // merchant/trainer buttons can sit inside that circle. Passive background frames such
+            // as the chat panel stay transparent, so they do not shrink the useful stick area.
+            let interactive_ui = can_route_ui
+                && !owns_look
+                && script.hit_test_is_interactive(x, y);
             let claim_move = matches!(touch.phase, TouchPhase::Started)
                 && in_move_stick
+                && !interactive_ui
                 && touch_move_id.is_none();
-            let can_route_ui = !gamepad_mouse && touch_ui_id.is_none();
             // Do not move the single WoW UI pointer once a finger has been captured for camera look.
             let hit_frame = if can_route_ui && !claim_move && !owns_look {
                 script.mouse_move(x, y)

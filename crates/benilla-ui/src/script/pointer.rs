@@ -152,51 +152,41 @@ impl UiScript {
     /// remain transparent to stick ownership, while controls and frames with real mouse handlers
     /// get the touch so fixed-position vendor/trainer windows stay usable.
     pub fn hit_test_is_interactive(&self, x: f32, y: f32) -> bool {
-        let Some(id) = self.hit_test(x, y) else {
-            return false;
-        };
+        // Do not ask the ordinary hit-test for its single topmost frame here. The world and
+        // other large mouse-enabled frames can sit above the actual controls in the hit order;
+        // classifying that one frame as interactive would reserve the whole stick area for UI.
+        // Instead, search the same hit order for a real control under this point, skipping generic
+        // containers and WorldFrame.
         let model = self.model_ref();
-        let Some(&h) = model.id_to_frame.get(&id) else {
-            return false;
-        };
-        let Some(frame) = model.arena.frame(h) else {
-            return false;
-        };
+        let sorted = order::traversal(&model.arena);
+        let scroll_sources = scroll_clip_sources(&model);
+        order::hit_test(&sorted, |fh| {
+            let Some(frame) = model.arena.frame(fh) else {
+                return false;
+            };
+            let control = matches!(
+                frame.kind,
+                crate::widget::FrameKind::Button
+                    | crate::widget::FrameKind::LootButton
+                    | crate::widget::FrameKind::CheckButton
+                    | crate::widget::FrameKind::EditBox
+                    | crate::widget::FrameKind::Slider
+                    | crate::widget::FrameKind::ColorSelect
+                    | crate::widget::FrameKind::Minimap
+            );
+            if !control || frame.kind == crate::widget::FrameKind::WorldFrame {
+                return false;
+            }
 
-        // WorldFrame spans the whole viewport and has mouse handlers for camera/world clicks.
-        // It is not an overlay control: treating those handlers as UI would claim the entire
-        // screen for UI priority and starve the virtual movement stick everywhere.
-        if frame.kind == crate::widget::FrameKind::WorldFrame {
-            return false;
-        }
-
-        let control = matches!(
-            frame.kind,
-            crate::widget::FrameKind::Button
-                | crate::widget::FrameKind::LootButton
-                | crate::widget::FrameKind::CheckButton
-                | crate::widget::FrameKind::EditBox
-                | crate::widget::FrameKind::Slider
-                | crate::widget::FrameKind::ColorSelect
-                | crate::widget::FrameKind::Minimap
-        );
-        let mouse_handler = model.scripts.get(&h).is_some_and(|scripts| {
-            scripts.iter().any(|handler| {
-                matches!(
-                    *handler,
-                    "OnClick"
-                        | "OnMouseDown"
-                        | "OnMouseUp"
-                        | "OnDoubleClick"
-                        | "OnDragStart"
-                        | "OnDragStop"
-                        | "OnReceiveDrag"
-                        | "OnHyperlinkClick"
-                )
-            })
-        });
-
-        control || mouse_handler
+            (model.arena.is_mouse_enabled(fh) || link_span_hit(&model, fh, x, y))
+                && !model.nameplates.vetoes(fh)
+                && model.resolved.get(&fh).is_some_and(|r| {
+                    point_in_rect(inset_rect(*r, model.arena.hit_rect_insets(fh)), x, y)
+                })
+                && effective_clip(&model, &scroll_sources, fh)
+                    .is_none_or(|c| point_in_rect(c, x, y))
+        })
+        .is_some()
     }
 
     /// Move the cursor to `(x, y)`. When the hovered frame changes, fires `OnLeave(self, true)` on

@@ -709,6 +709,7 @@ mod tests {
         let eased = pitch2.expect("the cap bit");
         assert!(eased > 0.0 && eased < aim, "between level and the raw aim");
     }
+
     #[test]
     fn sit_or_stand_adds_a_downward_swim_axis_without_forward_motion() {
         let basis = (Vec3::NEG_Z, Vec3::X);

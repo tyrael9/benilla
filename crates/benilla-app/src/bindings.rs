@@ -405,6 +405,7 @@ fn latch_and_dispatch(
         state
             .held
             .retain(|&i| matches!(i, Input::TurnOrAction | Input::CameraOrSelectOrMove));
+        state.sit_or_stand_down = false;
     }
     // Lua's binding calls made since the last pass, before this frame's keys.
     if let Some(s) = script.as_mut() {
@@ -826,7 +827,10 @@ fn release(state: &mut BindingsState, script: &mut Option<NonSendMut<UiScript>>,
     // Several physical inputs may be bound to SITORSTAND. Keep descent active until the last
     // one is released, and clear it through the same path as an ordinary/stuck key release.
     if released_sit_or_stand
-        && !state.latched.iter().any(|(_, command)| command.eq_ignore_ascii_case("SITORSTAND"))
+        && !state
+            .latched
+            .iter()
+            .any(|(_, command)| command.eq_ignore_ascii_case("SITORSTAND"))
     {
         state.sit_or_stand_down = false;
     }

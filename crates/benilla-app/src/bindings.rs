@@ -98,6 +98,10 @@ pub(crate) struct BindingsState {
     /// command's `runOnUp` half. The reference replays the press-time chord at key-up (`0x483bd0`);
     /// latching the resolved command is equivalent.
     latched: Vec<(Held, String)>,
+    /// Physical down state for the legacy press-only SITORSTAND binding. Vanilla 1.12's
+    /// binding XML does not run that command on key-up, but swimming still needs a held descend
+    /// input, so track its resolved physical binding independently of Lua's one-shot.
+    sit_or_stand_down: bool,
     /// The held bits a Start set and no Stop has cleared.
     held: Vec<Input>,
     /// Inputs whose Start, or whose one-shot, came this frame (the press edge).
@@ -146,6 +150,10 @@ impl BindingsState {
     /// Did this one-shot fire this frame?
     pub(crate) fn fired(&self, i: Input) -> bool {
         self.fired.contains(&i)
+    }
+    /// Is the physical key/button currently held for the stock SITORSTAND binding?
+    pub(crate) fn sit_or_stand_down(&self) -> bool {
+        self.sit_or_stand_down
     }
     /// Total amount for a one-shot this frame (0.0 when idle): the camera zoom's yards.
     pub(crate) fn amount(&self, i: Input) -> f32 {
@@ -383,6 +391,7 @@ fn latch_and_dispatch(
         if same_vm.claim(script) {
             state.latched.clear();
             state.held.clear();
+            state.sit_or_stand_down = false;
         }
     }
     // The reference's two bulk clears: the window deactivate (`0x514490`'s `and eax,0xfffff00f`,
@@ -391,6 +400,7 @@ fn latch_and_dispatch(
     // stuck-latch sweep too, whose up-half runs the Stop.
     if cover.is_some_and(|c| c.covering()) {
         state.held.clear();
+        state.sit_or_stand_down = false;
     } else if focus_lost.read().count() > 0 {
         state
             .held
@@ -789,6 +799,9 @@ fn press(
             warn!("bindings({command}): {e}");
         }
     }
+    if command.eq_ignore_ascii_case("SITORSTAND") {
+        state.sit_or_stand_down = true;
+    }
     state.latched.push((key, command.to_owned()));
 }
 
@@ -796,9 +809,11 @@ fn press(
 /// typing (the reference completes a pressed binding's release regardless of focus).
 fn release(state: &mut BindingsState, script: &mut Option<NonSendMut<UiScript>>, key: Held) {
     let mut i = 0;
+    let mut released_sit_or_stand = false;
     while i < state.latched.len() {
         if state.latched[i].0 == key {
             let (_, command) = state.latched.remove(i);
+            released_sit_or_stand |= command.eq_ignore_ascii_case("SITORSTAND");
             if let Some(s) = script.as_mut() {
                 if let Err(e) = s.execute_binding(&command, false) {
                     warn!("bindings({command}): {e}");
@@ -807,6 +822,13 @@ fn release(state: &mut BindingsState, script: &mut Option<NonSendMut<UiScript>>,
         } else {
             i += 1;
         }
+    }
+    // Several physical inputs may be bound to SITORSTAND. Keep descent active until the last
+    // one is released, and clear it through the same path as an ordinary/stuck key release.
+    if released_sit_or_stand
+        && !state.latched.iter().any(|(_, command)| command.eq_ignore_ascii_case("SITORSTAND"))
+    {
+        state.sit_or_stand_down = false;
     }
 }
 
@@ -1618,6 +1640,25 @@ mod tests {
         press_key(&mut app, KeyCode::KeyX);
         app.update();
         assert!(state(&app).fired(Input::SitOrStand));
+    }
+
+    #[test]
+    fn sit_or_stand_tracks_the_physical_hold_even_for_vanilla_press_only_bindings() {
+        let mut app = harness();
+        press_key(&mut app, KeyCode::KeyX);
+        app.update();
+
+        assert!(state(&app).sit_or_stand_down());
+        assert!(state(&app).fired(Input::SitOrStand));
+
+        // The binding has no runOnUp in the stock 1.12 XML, but the physical held state persists.
+        app.update();
+        assert!(state(&app).sit_or_stand_down());
+
+        release_key(&mut app, KeyCode::KeyX);
+        app.update();
+        assert!(!state(&app).sit_or_stand_down());
+        assert!(!state(&app).fired(Input::SitOrStand), "release must not sit/stand a second time");
     }
 
     /// A shown keyboard frame eating the key that closes it costs that key its binding and

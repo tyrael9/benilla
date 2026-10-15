@@ -51,7 +51,14 @@ pub(super) fn update(
     // The queued asks (the `/sit` family) ran in the reference's message pass, before the X key
     // is read; the last writer wins, and all land on the single commit below.
     let mut request_stand = asks.read().last().map(|r| r.state);
-    if binds.fired(crate::bindings::Input::SitOrStand) {
+    // The stock 1.12 SITORSTAND action also descends in deep water. Don't translate that
+    // keypress into a stand-state request; SetStandState correctly refuses sitting while swimming.
+    let in_deep_water = player.swimming
+        || player.move_flags() & crate::creature_anim::move_flags::SWIMMING != 0
+        || player.liquid_surface.is_some_and(|surface| {
+            surface - player.pos.y > super::swim::swim_enter_depth(player.collision_height.0)
+        });
+    if binds.fired(crate::bindings::Input::SitOrStand) && !in_deep_water {
         request_stand = Some(u8::from(stand_state == 0));
     }
     // Movement stands us up, volunteered, as the server never does: translation, a keyboard turn

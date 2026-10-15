@@ -655,6 +655,7 @@ pub(super) fn control(
                 surface_y,
                 (move_fwd, move_right),
                 (swim_fwd, swim_side),
+                swimming && may_translate && binds.sit_or_stand_down(),
                 mover_speeds,
                 move_speed,
                 if translating { drunk_wobble } else { 0.0 },

@@ -57,6 +57,8 @@ pub(crate) fn stamp_input(
     mut wheel: MessageReader<MouseWheel>,
     motion: Res<AccumulatedMouseMotion>,
     gamepad: Option<Res<crate::gamepad::GamepadState>>,
+    // iOS touch events don't pass through Bevy's mouse-button/motion messages.
+    #[cfg(target_os = "ios")] mut touches: MessageReader<bevy::input::touch::TouchInput>,
 ) {
     // `count()` and a bitwise `|` drain every reader, or unread messages warm the clock next frame.
     // `repeat` is category 0xa, which has no store; `Released` never carries the flag.
@@ -65,9 +67,17 @@ pub(crate) fn stamp_input(
         | (wheel.read().count() != 0)
         | (motion.delta != Vec2::ZERO);
 
+    // A real touch down, move or release is user input just like the mouse event it substitutes.
+    // Consume the whole reader so batched touches cannot leak into later frames.
+    #[cfg(target_os = "ios")]
+    let touch_activity = touches.read().count() != 0;
+    #[cfg(not(target_os = "ios"))]
+    let touch_activity = false;
+
     let gamepad_active = gamepad.is_some_and(|g| {
         g.move_stick.length_squared() > 0.01
             || g.look_stick.length_squared() > 0.01
+            || (g.touch_move_active && g.touch_move_stick.length_squared() > 0.01)
             || g.a
             || g.b
             || g.x
@@ -86,7 +96,7 @@ pub(crate) fn stamp_input(
             || g.dpad_right
     });
 
-    if any || gamepad_active {
+    if any || touch_activity || gamepad_active {
         last.0 = time.elapsed();
     }
 }
@@ -420,6 +430,8 @@ mod tests {
                 .add_message::<KeyboardInput>()
                 .add_message::<MouseButtonInput>()
                 .add_message::<MouseWheel>();
+            #[cfg(target_os = "ios")]
+            app.add_message::<bevy::input::touch::TouchInput>();
             app.world_mut()
                 .resource_mut::<Time<Real>>()
                 .advance_by(Duration::from_millis(1234));

@@ -580,6 +580,9 @@ pub(crate) struct LoginForm {
     pub(super) account: EditBoxState,
     pub(super) password: EditBoxState,
     pub(super) focus: Field,
+    /// Whether an edit box currently owns keyboard focus. The selected field is retained so a
+    /// later click can restore it, but a background click clears the caret/IME ownership.
+    pub(super) focused: bool,
     pub(super) save: bool,
 }
 
@@ -590,6 +593,7 @@ impl Default for LoginForm {
             // Masks the display; the real text is never rendered or copied.
             password: textinput::field(MAX_LETTERS, true),
             focus: Field::default(),
+            focused: true,
             save: false,
         }
     }
@@ -604,9 +608,17 @@ impl LoginForm {
     fn focus(&mut self, field: Field) {
         self.focused().highlight_text(0, 0);
         self.focus = field;
+        self.focused = true;
         let f = self.focused();
         f.highlight_text(0, -1);
         f.reset_blink();
+    }
+
+    fn clear_focus(&mut self) {
+        self.focused().highlight_text(0, 0);
+        self.focused = false;
+        self.focused().caret_shown = false;
+        self.focused().blink_accum = 0.0;
     }
 
     fn focused(&mut self) -> &mut EditBoxState {
@@ -647,13 +659,19 @@ fn enter_login(mut form: ResMut<LoginForm>, mut preview: ResMut<GluePreview>) {
 #[allow(clippy::type_complexity)]
 fn login_input(
     realms: Res<crate::realm_select::Realms>,
-    presses: Query<(Entity, &LoginAction, Ref<Interaction>)>,
+    presses: Query<(
+        Entity,
+        Option<&LoginAction>,
+        Option<&crate::glue::dialog::DialogEditFocus>,
+        Ref<Interaction>,
+    )>,
     clicks: Res<crate::glue::GlueClicks>,
     mut keyboard: MessageReader<KeyboardInput>,
     keys: Res<ButtonInput<KeyCode>>,
     // The pasteboard, and the layout that names the clipboard chords' letters.
     (mut clipboard, layout): (NonSendMut<HostClipboard>, Res<crate::bindings::LayoutNames>),
     raw_handle: Query<&bevy::window::RawHandleWrapper, With<bevy::window::PrimaryWindow>>,
+    mut windows: Query<&mut bevy::window::Window, With<bevy::window::PrimaryWindow>>,
     mut form: ResMut<LoginForm>,
     mut attempt: Attempt,
     mut dialog: ResMut<GlueDialog>,
@@ -676,7 +694,29 @@ fn login_input(
 
     let dialog_open = dialog.kind.is_some();
 
-    for (entity, action, interaction) in &presses {
+    // The realmlist edit box is owned by GlueDialog, but focus/IME belongs to the same input
+    // system as the login fields. Its click must establish focus before KeyboardInput is consumed.
+    #[cfg(target_os = "ios")]
+    if dialog_open && dialog.kind == Some(DialogKind::Realmlist) {
+        for (_entity, action, edit_focus, interaction) in &presses {
+            if edit_focus.is_some()
+                && action.is_none()
+                && interaction.is_changed()
+                && *interaction == Interaction::Pressed
+            {
+                dialog.edit.reset_blink();
+                if let Ok(mut window) = windows.single_mut() {
+                    window.ime_enabled = true;
+                }
+            }
+        }
+    }
+
+    for (entity, action, edit_focus, interaction) in &presses {
+        if edit_focus.is_some() {
+            continue;
+        }
+        let Some(action) = action else { continue; };
         if dialog_open {
             continue;
         }
@@ -684,8 +724,29 @@ fn login_input(
         // unconditionally, without waiting for a release.
         if interaction.is_changed() && *interaction == Interaction::Pressed {
             match action {
-                LoginAction::FocusAccount => form.focus(Field::Account),
-                LoginAction::FocusPassword => form.focus(Field::Password),
+                LoginAction::FocusAccount => {
+                    form.focus(Field::Account);
+                    #[cfg(target_os = "ios")]
+                    if let Ok(mut window) = windows.single_mut() {
+                        // winit's iOS WinitView implements UIKeyInput; enabling IME makes it
+                        // become first responder and lets UIKit present the software keyboard.
+                        window.ime_enabled = true;
+                    }
+                }
+                LoginAction::FocusPassword => {
+                    form.focus(Field::Password);
+                    #[cfg(target_os = "ios")]
+                    if let Ok(mut window) = windows.single_mut() {
+                        window.ime_enabled = true;
+                    }
+                }
+                LoginAction::ClearFocus => {
+                    form.clear_focus();
+                    #[cfg(target_os = "ios")]
+                    if let Ok(mut window) = windows.single_mut() {
+                        window.ime_enabled = false;
+                    }
+                }
                 _ => {}
             }
         }
@@ -694,7 +755,7 @@ fn login_input(
             continue;
         }
         match action {
-            LoginAction::FocusAccount | LoginAction::FocusPassword => {} // focused on the press
+            LoginAction::FocusAccount | LoginAction::FocusPassword | LoginAction::ClearFocus => {} // handled on press
             LoginAction::Login => do_login = true,
             LoginAction::Quit => do_quit = true,
             LoginAction::Realmlist => {
@@ -752,8 +813,9 @@ fn login_input(
             continue;
         }
         // The shared edit box first; what it leaves unclaimed is the screen's (Tab here, Enter
-        // and Escape below).
-        if textinput::feed_key(
+        // and Escape below). A background click can leave the selected field remembered, but it
+        // no longer owns keyboard input.
+        if form.focused && textinput::feed_key(
             form.focused(),
             ev,
             mods,
@@ -768,7 +830,7 @@ fn login_input(
             }
             continue;
         }
-        if ev.state == ButtonState::Pressed && ev.key_code == KeyCode::Tab {
+        if form.focused && ev.state == ButtonState::Pressed && ev.key_code == KeyCode::Tab {
             let next = match form.focus {
                 Field::Account => Field::Password,
                 Field::Password => Field::Account,
@@ -781,6 +843,13 @@ fn login_input(
         && (keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::NumpadEnter))
     {
         do_login = true;
+    }
+
+    #[cfg(target_os = "ios")]
+    if dialog_open {
+        if let Ok(mut window) = windows.single_mut() {
+            window.ime_enabled = dialog.kind == Some(DialogKind::Realmlist);
+        }
     }
     if !dialog_open && keys.just_pressed(KeyCode::Escape) {
         do_quit = true;
@@ -813,6 +882,10 @@ fn login_input(
                 let (user, pass) = (form.account.text.clone(), form.password.text.clone());
                 form.password.set_text("");
                 dialog.open_status(strings.text("LOGIN_STATE_CONNECTING", "Connecting"));
+                #[cfg(target_os = "ios")]
+                if let Ok(mut window) = windows.single_mut() {
+                    window.ime_enabled = false;
+                }
                 attempt.send(&user, &pass, true);
             }
         }
@@ -829,7 +902,8 @@ fn login_input(
 fn tick_login_caret(mut form: ResMut<LoginForm>, mut dialog: ResMut<GlueDialog>, time: Res<Time>) {
     let dt = time.delta_secs();
     let in_dialog = dialog.kind.is_some_and(DialogKind::has_edit_box);
-    textinput::tick_caret(form.focused(), !in_dialog, dt);
+    let form_focused = form.focused;
+    textinput::tick_caret(form.focused(), form_focused && !in_dialog, dt);
     if in_dialog {
         textinput::tick_caret(&mut dialog.edit, true, dt);
     }
@@ -915,6 +989,8 @@ fn accept_realmlist(
         return false;
     };
     realmlist.set(&address);
+    #[cfg(target_os = "ios")]
+    crate::realmlist::save_ios_realmlist(&address);
     let name = crate::realmlist::CVAR_REALMLIST;
     match script {
         Some(script) => {

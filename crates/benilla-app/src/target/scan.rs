@@ -26,7 +26,7 @@ use super::cursor_mode::{
     meeting_stone_queued,
     GoOverrides,
 };
-use super::relations::{can_assist, can_attack, can_interact, corpse_friendly};
+use super::relations::{can_assist, can_attack, can_interact};
 use super::ring::reaction_from_player;
 use super::{Factions, Selection};
 

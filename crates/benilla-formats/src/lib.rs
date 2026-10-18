@@ -22,6 +22,9 @@ pub use install::{
     addon_corpus, addon_corpus_candidates, candidates, project_folder, set_project_folder, skipped,
     wow_data,
 };
+#[cfg(target_os = "ios")]
+pub use install::{prepare_ios_addons, prepare_ios_data};
+
 mod characters;
 pub use characters::{
     equip_blits, equip_column, equip_region_candidates, equip_tex_dir, equip_tile, forearm_dressed,

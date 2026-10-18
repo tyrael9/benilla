@@ -175,6 +175,13 @@ pub(crate) fn reconcile_afk_mirror(
     }
 }
 
+/// Whether a sampled gamepad state contains an actual movement input that clears AFK.
+/// Touch input is gated by ownership so a stale nonzero stick value cannot clear AFK after release.
+fn gamepad_movement_clears_afk(g: &crate::gamepad::GamepadState) -> bool {
+    g.move_stick.length_squared() > 0.01
+        || (g.touch_move_active && g.touch_move_stick.length_squared() > 0.01)
+}
+
 /// The movement AFK clears: jump (`0x513d36`), forward/back (`0x514e23`), strafe (`0x514f0b`)
 /// and keyboard turn (`0x514fca`). They sit in the movement emitters, so only a key press
 /// clears; mouse-look turning never reaches `0x514f50`, and knockback, fear and splines press
@@ -204,9 +211,7 @@ pub(crate) fn movement_clears_afk(
     .iter()
     .any(|&c| binds.just_pressed(c));
 
-    let gamepad_moved = gamepad.is_some_and(|g| {
-        g.move_stick.length_squared() > 0.01
-    });
+    let gamepad_moved = gamepad.is_some_and(|g| gamepad_movement_clears_afk(&g));
 
     let moved = keyboard_moved || gamepad_moved;
     if !moved {
@@ -244,6 +249,37 @@ mod tests {
             }
             .to_string(),
         )
+    }
+
+    #[test]
+    fn physical_and_touch_sticks_clear_afk_only_while_moving() {
+        use crate::gamepad::GamepadState;
+
+        assert!(gamepad_movement_clears_afk(&GamepadState {
+            move_stick: Vec2::Y,
+            ..Default::default()
+        }));
+        assert!(gamepad_movement_clears_afk(&GamepadState {
+            touch_move_active: true,
+            touch_move_stick: Vec2::Y,
+            ..Default::default()
+        }));
+        assert!(
+            !gamepad_movement_clears_afk(&GamepadState {
+                touch_move_active: true,
+                touch_move_stick: Vec2::ZERO,
+                ..Default::default()
+            }),
+            "holding the virtual stick at center is not movement"
+        );
+        assert!(
+            !gamepad_movement_clears_afk(&GamepadState {
+                touch_move_active: false,
+                touch_move_stick: Vec2::Y,
+                ..Default::default()
+            }),
+            "a stale touch axis after release must not clear AFK"
+        );
     }
 
     #[test]

@@ -174,6 +174,11 @@ pub(crate) struct DialogText;
 #[derive(Component, Clone)]
 pub(crate) struct DialogEditText;
 
+/// The realmlist editor's text row is a real interactive edit box on iOS, so tapping it can
+/// explicitly take IME focus just like the login account/password boxes.
+#[derive(Component, Clone, Copy)]
+pub(crate) struct DialogEditFocus;
+
 /// Build the `GlueDialog` tree: a 512-wide `UI-DialogBox` backdrop, the message wrapping at 440,
 /// an optional edit box and one or two 200×40 buttons, sized to its content as
 /// `GlueDialog_OnShow` does: `16 + text + 8 + editbox + 8 + button + 16`. A button pair is
@@ -260,7 +265,7 @@ pub(crate) fn spawn_dialog(
                         b,
                         art,
                         &edit_font,
-                        (),
+                        (DialogEditFocus, Button),
                         DialogEditText,
                         (300.0, 32.0),
                         (BOX_BORDER, BOX_FILL),

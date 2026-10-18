@@ -28,10 +28,22 @@ pub(crate) fn home() -> Option<PathBuf> {
     if let Some(over) = std::env::var_os("BENILLA_HOME") {
         return Some(PathBuf::from(over));
     }
+    #[cfg(target_os = "ios")]
+    {
+        return ios_home();
+    }
     if cfg!(test) {
         return None; // a unit test reaches no real state folder unless it pins `$BENILLA_HOME`
     }
     resident_home()
+}
+
+/// iOS keeps all mutable client state in the app container, outside the bundled app itself.
+#[cfg(target_os = "ios")]
+fn ios_home() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .map(|h| h.join("Library/Application Support/Benilla/benilla-config"))
 }
 
 /// Steps 2 and 3 of [`home`]: the folder the build itself lives in.

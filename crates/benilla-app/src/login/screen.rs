@@ -37,6 +37,8 @@ pub(crate) enum LoginAction {
     ToggleSave,
     /// Open the realmlist editor, from the button or the address readout under it.
     Realmlist,
+    /// A transparent full-screen hit target used only to clear edit-box focus.
+    ClearFocus,
 }
 
 /// Root of the login screen; `with_art` and `s` (the glue scale) record what the tree was built
@@ -145,6 +147,9 @@ fn spawn_screen(
                 with_art: art.button_up.is_some(),
                 s,
             },
+            // The login canvas is itself a transparent button. Tapping anywhere that is not one
+            // of the actual controls reaches this hit target and clears the edit-box focus.
+            (LoginAction::ClearFocus, Button),
             GlobalZIndex(SCREEN_Z),
             Node {
                 width: Val::Percent(100.0),

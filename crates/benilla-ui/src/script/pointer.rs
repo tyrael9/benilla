@@ -147,6 +147,48 @@ impl UiScript {
         model.arena.frame(fh)?.name.clone()
     }
 
+    /// Whether a touch at `(x, y)` is over a UI control that should win against the iOS
+    /// virtual movement stick. Plain mouse-enabled background frames (for example a blank panel)
+    /// remain transparent to stick ownership, while controls and frames with real mouse handlers
+    /// get the touch so fixed-position vendor/trainer windows stay usable.
+    pub fn hit_test_is_interactive(&self, x: f32, y: f32) -> bool {
+        // Do not ask the ordinary hit-test for its single topmost frame here. The world and
+        // other large mouse-enabled frames can sit above the actual controls in the hit order;
+        // classifying that one frame as interactive would reserve the whole stick area for UI.
+        // Instead, search the same hit order for a real control under this point, skipping generic
+        // containers and WorldFrame.
+        let model = self.model_ref();
+        let sorted = order::traversal(&model.arena);
+        let scroll_sources = scroll_clip_sources(&model);
+        order::hit_test(&sorted, |fh| {
+            let Some(frame) = model.arena.frame(fh) else {
+                return false;
+            };
+            let control = matches!(
+                frame.kind,
+                crate::widget::FrameKind::Button
+                    | crate::widget::FrameKind::LootButton
+                    | crate::widget::FrameKind::CheckButton
+                    | crate::widget::FrameKind::EditBox
+                    | crate::widget::FrameKind::Slider
+                    | crate::widget::FrameKind::ColorSelect
+                    | crate::widget::FrameKind::Minimap
+            );
+            if !control || frame.kind == crate::widget::FrameKind::WorldFrame {
+                return false;
+            }
+
+            (model.arena.is_mouse_enabled(fh) || link_span_hit(&model, fh, x, y))
+                && !model.nameplates.vetoes(fh)
+                && model.resolved.get(&fh).is_some_and(|r| {
+                    point_in_rect(inset_rect(*r, model.arena.hit_rect_insets(fh)), x, y)
+                })
+                && effective_clip(&model, &scroll_sources, fh)
+                    .is_none_or(|c| point_in_rect(c, x, y))
+        })
+        .is_some()
+    }
+
     /// Move the cursor to `(x, y)`. When the hovered frame changes, fires `OnLeave(self, true)` on
     /// the old one if still live and `OnEnter(self, true)` on the new; a disabled Button takes the
     /// hover but fires neither ([`button::hover_notify_runs`]). Drags and frame moves advance

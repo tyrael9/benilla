@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+#[cfg(not(target_os = "ios"))]
 use sdl3::gamepad::{Axis, Button, Gamepad};
 use benilla_ui::script::{NearestMode, ScriptCall, UiScript};
 use crate::bindings::BindingDispatch;
@@ -37,6 +38,15 @@ pub(crate) struct GamepadState {
     pub connected: bool,
     pub move_stick: Vec2,
     pub look_stick: Vec2,
+
+    /// A touch-owned virtual stick can steer independently of the UI pointer.
+    pub touch_move_stick: Vec2,
+    pub touch_move_active: bool,
+
+    /// A world-area touch drag, in the same screen-pixel delta units as MouseMotion.
+    pub touch_look_delta: Vec2,
+    /// True once a touch has crossed the drag threshold and still owns the gesture.
+    pub touch_look_active: bool,
 
     // Face buttons
     pub a: bool,
@@ -97,7 +107,13 @@ pub(crate) struct GamepadState {
 
 impl GamepadState {
     pub(crate) fn move_axis(&self) -> Vec2 {
-        apply_deadzone(self.move_stick, 0.15)
+        // A touch stick owns movement while its finger is captured, even when centered.
+        // Otherwise keep the physical controller path byte-for-byte equivalent.
+        if self.touch_move_active {
+            apply_deadzone(self.touch_move_stick, 0.15)
+        } else {
+            apply_deadzone(self.move_stick, 0.15)
+        }
     }
 
     pub(crate) fn look_axis(&self) -> Vec2 {
@@ -188,6 +204,9 @@ impl GamepadState {
             left_y: self.move_stick.y,
             right_x: self.look_stick.x,
             right_y: self.look_stick.y,
+            touch_move_x: self.touch_move_stick.x,
+            touch_move_y: self.touch_move_stick.y,
+            touch_move_active: self.touch_move_active,
         }
     }
 }
@@ -209,10 +228,14 @@ impl GamepadState {
 // panic.
 // ============================================================
 
+#[cfg(not(target_os = "ios"))]
 pub(crate) struct SdlGamepad {
     pub(crate) _sdl: sdl3::Sdl,
     pub(crate) gamepad: Gamepad,
 }
+
+#[cfg(target_os = "ios")]
+pub(crate) struct SdlGamepad;
 
 
 // ============================================================
@@ -221,79 +244,41 @@ pub(crate) struct SdlGamepad {
 // Call this BEFORE app.run().
 // ============================================================
 
+#[cfg(not(target_os = "ios"))]
 pub(crate) fn init_sdl(gamepad_index: usize) -> Option<SdlGamepad> {
     println!("SDL: init");
 
     let sdl = match sdl3::init() {
-        Ok(sdl) => {
-            println!("SDL: sdl3::init OK");
-            sdl
-        }
-        Err(err) => {
-            println!("SDL: init FAILED: {err}");
-            return None;
-        }
+        Ok(sdl) => { println!("SDL: sdl3::init OK"); sdl }
+        Err(err) => { println!("SDL: init FAILED: {err}"); return None; }
     };
-
-    println!("SDL: getting gamepad subsystem");
-
     let gamepad_subsystem = match sdl.gamepad() {
-        Ok(gamepad) => {
-            println!("SDL: gamepad subsystem OK");
-            gamepad
-        }
-        Err(err) => {
-            println!("SDL: gamepad subsystem FAILED: {err}");
-            return None;
-        }
+        Ok(gamepad) => { println!("SDL: gamepad subsystem OK"); gamepad }
+        Err(err) => { println!("SDL: gamepad subsystem FAILED: {err}"); return None; }
     };
-
-    println!("SDL: enumerating gamepads");
-
     let ids = match gamepad_subsystem.gamepads() {
         Ok(ids) => {
             println!("SDL: gamepads() OK, count = {}", ids.len());
-
-            for id in &ids {
-                println!(
-                    "SDL GAMEPAD: {:?} {:?}",
-                    id,
-                    gamepad_subsystem.name_for_id(*id)
-                );
-            }
-
+            for id in &ids { println!("SDL GAMEPAD: {:?} {:?}", id, gamepad_subsystem.name_for_id(*id)); }
             ids
         }
-        Err(err) => {
-            println!("SDL: gamepads() FAILED: {err}");
-            return None;
-        }
+        Err(err) => { println!("SDL: gamepads() FAILED: {err}"); return None; }
     };
-
     let Some(id) = ids.get(gamepad_index).copied() else {
         println!("SDL: NO GAMEPAD");
         return None;
     };
-
-    println!("SDL: opening gamepad {:?}", id);
-
     let gamepad = match gamepad_subsystem.open(id) {
-        Ok(gamepad) => {
-            println!("SDL: gamepad opened OK");
-            gamepad
-        }
-        Err(err) => {
-            println!("SDL: gamepad open FAILED: {err}");
-            return None;
-        }
+        Ok(gamepad) => { println!("SDL: gamepad opened OK"); gamepad }
+        Err(err) => { println!("SDL: gamepad open FAILED: {err}"); return None; }
     };
-
-    Some(SdlGamepad {
-        _sdl: sdl,
-        gamepad,
-    })
+    Some(SdlGamepad { _sdl: sdl, gamepad })
 }
 
+#[cfg(target_os = "ios")]
+pub(crate) fn init_sdl(_gamepad_index: usize) -> Option<SdlGamepad> {
+    None
+}
 
 // ============================================================
 // Debug overlay marker
@@ -304,6 +289,115 @@ struct GamepadDebugText;
 
 fn gamepad_debug_enabled() -> bool {
     std::env::var("BENILLA_GAMEPAD_DEBUG").as_deref() == Ok("1")
+}
+
+#[cfg(target_os = "ios")]
+fn ios_diagnostics_enabled() -> bool {
+    // The on-screen diagnostics are opt-in; leave ordinary iOS builds uncluttered.
+    std::env::var("BENILLA_IOS_DIAGNOSTICS").as_deref() == Ok("1")
+}
+
+#[cfg(target_os = "ios")]
+#[derive(Component)]
+struct IosDiagnosticsText;
+
+#[cfg(target_os = "ios")]
+#[derive(Resource, Default)]
+struct IosDiagnosticsFps {
+    elapsed: f32,
+    frames: u32,
+    fps: f32,
+}
+
+#[cfg(target_os = "ios")]
+fn setup_ios_diagnostics(mut commands: Commands) {
+    commands.spawn((
+        Text::new("FPS --  BEVY --x--  SCREEN --x--"),
+        TextFont {
+            // This HUD is diagnostic-only; keep it small enough for the phone in landscape.
+            font_size: 9.0,
+            ..default()
+        },
+        TextColor(Color::WHITE),
+        TextLayout::new_with_justify(Justify::Center),
+        Node {
+            position_type: PositionType::Absolute,
+            top: px(4.0),
+            left: px(0.0),
+            right: px(0.0),
+            width: percent(100.0),
+            ..default()
+        },
+        IosDiagnosticsText,
+    ));
+}
+
+#[cfg(target_os = "ios")]
+fn update_ios_diagnostics(
+    time: Res<Time>,
+    mut fps: ResMut<IosDiagnosticsFps>,
+    window: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    mut text: Query<&mut Text, With<IosDiagnosticsText>>,
+) {
+    fps.elapsed += time.delta_secs();
+    fps.frames += 1;
+
+    if fps.elapsed < 0.25 {
+        return;
+    }
+
+    fps.fps = fps.frames as f32 / fps.elapsed.max(0.001);
+    fps.elapsed = 0.0;
+    fps.frames = 0;
+
+    let Ok(window) = window.single() else {
+        return;
+    };
+    let Ok(mut text) = text.single_mut() else {
+        return;
+    };
+
+    let physical_w = window.resolution.physical_width();
+    let physical_h = window.resolution.physical_height();
+    let scale = window.resolution.scale_factor();
+    let logical_w = physical_w as f32 / scale;
+    let logical_h = physical_h as f32 / scale;
+
+    // UIKit reports bounds in points and nativeBounds in physical pixels.
+    // nativeBounds is portrait-oriented even when the phone is in landscape.
+    let (screen_w, screen_h, native_w, native_h, screen_scale, native_scale) = unsafe {
+        use objc2_ui_kit::UIScreen;
+        let Some(mtm) = objc2::MainThreadMarker::new() else {
+            return;
+        };
+        let screen = UIScreen::mainScreen(mtm);
+        let bounds = screen.bounds();
+        let native_bounds = screen.nativeBounds();
+        (
+            bounds.size.width,
+            bounds.size.height,
+            native_bounds.size.width,
+            native_bounds.size.height,
+            screen.scale(),
+            screen.nativeScale(),
+        )
+    };
+
+    *text = Text::new(format!(
+        "FPS {:>4.1}  BEVY {:>4.0}x{:>4.0} / {:>4}x{:>4} @ {:.2}\nSCREEN {:>4.0}x{:>4.0}  NATIVE {:>4.0}x{:>4.0}  SCALE {:.2}/{:.2}",
+        fps.fps,
+        logical_w,
+        logical_h,
+        physical_w,
+        physical_h,
+        scale,
+        screen_w,
+        screen_h,
+        native_w,
+        native_h,
+        screen_scale,
+        native_scale,
+    ));
 }
 
 
@@ -317,7 +411,7 @@ impl Plugin for GamepadPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GamepadState>()
             .add_systems(
-                Startup, 
+                Startup,
                 setup_gamepad_debug_overlay.run_if(gamepad_debug_enabled),
             )
             .add_systems(
@@ -342,12 +436,22 @@ impl Plugin for GamepadPlugin {
             )
             .add_systems(Update, gamepad_rt_interact)
             .add_systems(
-                Update, 
+                Update,
                 update_gamepad_debug_overlay.run_if(gamepad_debug_enabled),
+            );
+
+        #[cfg(target_os = "ios")]
+        app.init_resource::<IosDiagnosticsFps>()
+            .add_systems(
+                Startup,
+                setup_ios_diagnostics.run_if(ios_diagnostics_enabled),
+            )
+            .add_systems(
+                Update,
+                update_ios_diagnostics.run_if(ios_diagnostics_enabled),
             );
     }
 }
-
 
 // ============================================================
 // Debug overlay
@@ -389,6 +493,7 @@ fn setup_gamepad_debug_overlay(mut commands: Commands) {
 // Poll SDL gamepad
 // ============================================================
 
+#[cfg(not(target_os = "ios"))]
 fn poll_gamepad(
     sdl_gamepad: Option<NonSend<SdlGamepad>>,
     mut state: ResMut<GamepadState>,
@@ -400,9 +505,6 @@ fn poll_gamepad(
 
     state.connected = true;
 
-    // SDL is not running its own event loop.
-    //
-    // Explicitly update the gamepad state once per frame.
     sdl_gamepad.gamepad.subsystem().update();
 
     let gamepad = &sdl_gamepad.gamepad;
@@ -416,19 +518,13 @@ fn poll_gamepad(
     state.prev_dpad_right = state.dpad_right;
     state.prev_l = state.l;
     state.prev_r = state.r;
-
     state.prev_minus = state.minus;
     state.prev_plus = state.plus;
     state.prev_l3 = state.l3;
     state.prev_r3 = state.r3;
 
-    // --------------------------------------------------------
-    // Analog sticks
-    // --------------------------------------------------------
-
     let left_x = gamepad.axis(Axis::LeftX);
     let left_y = gamepad.axis(Axis::LeftY);
-
     let right_x = gamepad.axis(Axis::RightX);
     let right_y = gamepad.axis(Axis::RightY);
 
@@ -436,73 +532,28 @@ fn poll_gamepad(
         normalize_axis(left_x),
         -normalize_axis(left_y),
     );
-
     state.look_stick = Vec2::new(
         normalize_axis(right_x),
         normalize_axis(right_y),
     );
-
-
-    // --------------------------------------------------------
-    // Face buttons
-    //
-    // SDL uses the standard gamepad layout:
-    //
-    // South = A
-    // East  = B
-    // West  = X
-    // North = Y
-    // --------------------------------------------------------
 
     state.a = gamepad.button(Button::South);
     state.b = gamepad.button(Button::East);
     state.x = gamepad.button(Button::West);
     state.y = gamepad.button(Button::North);
 
-
-    // --------------------------------------------------------
-    // Shoulder buttons
-    // --------------------------------------------------------
-
     state.l = gamepad.button(Button::LeftShoulder);
     state.r = gamepad.button(Button::RightShoulder);
 
-
-    // --------------------------------------------------------
-    // Triggers
-    //
-    // ZL / ZR are analog axes in SDL's Gamepad API.
-    // --------------------------------------------------------
-
     state.prev_zl = state.zl;
-    state.zl = normalize_trigger(
-        gamepad.axis(Axis::TriggerLeft),
-    );
-
+    state.zl = normalize_trigger(gamepad.axis(Axis::TriggerLeft));
     state.prev_zr = state.zr;
-    state.zr = normalize_trigger(
-        gamepad.axis(Axis::TriggerRight),
-    );
-
-
-    // --------------------------------------------------------
-    // System buttons
-    // --------------------------------------------------------
+    state.zr = normalize_trigger(gamepad.axis(Axis::TriggerRight));
 
     state.minus = gamepad.button(Button::Back);
     state.plus = gamepad.button(Button::Start);
-
-
-    // --------------------------------------------------------
-    // Stick buttons
-    // --------------------------------------------------------
     state.l3 = gamepad.button(Button::LeftStick);
     state.r3 = gamepad.button(Button::RightStick);
-
-
-    // --------------------------------------------------------
-    // D-pad
-    // --------------------------------------------------------
 
     state.dpad_up = gamepad.button(Button::DPadUp);
     state.dpad_down = gamepad.button(Button::DPadDown);
@@ -510,6 +561,85 @@ fn poll_gamepad(
     state.dpad_right = gamepad.button(Button::DPadRight);
 }
 
+#[cfg(target_os = "ios")]
+fn poll_gamepad(
+    _sdl_gamepad: Option<NonSend<SdlGamepad>>,
+    mut state: ResMut<GamepadState>,
+) {
+    use objc2_game_controller::GCController;
+
+    let Some(controller) = (unsafe { GCController::current() }) else {
+        state.connected = false;
+        state.move_stick = Vec2::ZERO;
+        state.look_stick = Vec2::ZERO;
+        return;
+    };
+
+    let Some(gamepad) = (unsafe { controller.extendedGamepad() }) else {
+        state.connected = false;
+        state.move_stick = Vec2::ZERO;
+        state.look_stick = Vec2::ZERO;
+        return;
+    };
+
+    state.connected = true;
+
+    state.prev_a = state.a;
+    state.prev_b = state.b;
+    state.prev_x = state.x;
+    state.prev_y = state.y;
+    state.prev_dpad_up = state.dpad_up;
+    state.prev_dpad_down = state.dpad_down;
+    state.prev_dpad_left = state.dpad_left;
+    state.prev_dpad_right = state.dpad_right;
+    state.prev_l = state.l;
+    state.prev_r = state.r;
+    state.prev_minus = state.minus;
+    state.prev_plus = state.plus;
+    state.prev_l3 = state.l3;
+    state.prev_r3 = state.r3;
+
+    unsafe {
+        let left = gamepad.leftThumbstick();
+        let right = gamepad.rightThumbstick();
+        let dpad = gamepad.dpad();
+
+        // GameController already returns normalized, deadzoned axis values.
+        // Match the existing SDL convention: +Y means forward/up.
+        state.move_stick = Vec2::new(left.xAxis().value(), left.yAxis().value());
+        state.look_stick = Vec2::new(right.xAxis().value(), -right.yAxis().value());
+
+        state.a = gamepad.buttonA().isPressed();
+        state.b = gamepad.buttonB().isPressed();
+        state.x = gamepad.buttonX().isPressed();
+        state.y = gamepad.buttonY().isPressed();
+
+        state.l = gamepad.leftShoulder().isPressed();
+        state.r = gamepad.rightShoulder().isPressed();
+
+        state.prev_zl = state.zl;
+        state.prev_zr = state.zr;
+        state.zl = gamepad.leftTrigger().value();
+        state.zr = gamepad.rightTrigger().value();
+
+        // Apple has Menu/Options rather than SDL's Back/Start pair.
+        // Menu is the natural WoW "minus/back" equivalent; Options is "plus/map".
+        state.minus = gamepad.buttonOptions().is_some_and(|button| button.isPressed());
+        state.plus = gamepad.buttonMenu().isPressed();
+
+        state.l3 = gamepad
+            .leftThumbstickButton()
+            .is_some_and(|button| button.isPressed());
+        state.r3 = gamepad
+            .rightThumbstickButton()
+            .is_some_and(|button| button.isPressed());
+
+        state.dpad_up = dpad.up().isPressed();
+        state.dpad_down = dpad.down().isPressed();
+        state.dpad_left = dpad.left().isPressed();
+        state.dpad_right = dpad.right().isPressed();
+    }
+}
 fn gamepad_rt_interact(
     gamepad: Res<GamepadState>,
     selection: Res<crate::target::Selection>,
@@ -761,4 +891,29 @@ fn apply_deadzone(v: Vec2, deadzone: f32) -> Vec2 {
         .clamp(0.0, 1.0);
 
     normalized * magnitude
+}
+
+#[cfg(test)]
+mod touch_move_axis_tests {
+    use super::*;
+
+    #[test]
+    fn captured_touch_stick_owns_movement_then_releases_to_controller() {
+        let mut state = GamepadState {
+            move_stick: Vec2::X,
+            touch_move_stick: Vec2::Y,
+            touch_move_active: true,
+            ..default()
+        };
+
+        assert_eq!(state.move_axis(), apply_deadzone(Vec2::Y, 0.15));
+
+        // A centered finger still owns the axis; do not fall back to a held controller stick.
+        state.touch_move_stick = Vec2::ZERO;
+        assert_eq!(state.move_axis(), Vec2::ZERO);
+
+        // Releasing the finger restores the normal physical stick path.
+        state.touch_move_active = false;
+        assert_eq!(state.move_axis(), apply_deadzone(Vec2::X, 0.15));
+    }
 }

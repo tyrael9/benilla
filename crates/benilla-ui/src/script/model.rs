@@ -59,6 +59,12 @@ pub struct GamepadLuaState {
     pub left_y: f32,
     pub right_x: f32,
     pub right_y: f32,
+
+    /// The iOS touch joystick, published alongside the physical pad axes.
+    pub touch_move_x: f32,
+    pub touch_move_y: f32,
+    /// True while an iOS finger owns the movement-stick touch.
+    pub touch_move_active: bool,
 }
 
 /// Minted id to handle, indexed directly: ids are dense and every scripted call looks one up.
@@ -992,6 +998,13 @@ pub(crate) struct Model {
     pub(crate) modifiers: (bool, bool, bool),
     /// gamepad state for Lua.
     pub(crate) gamepad: GamepadLuaState,
+    /// Persistent UI-space geometry/mode for the iOS virtual movement stick.
+    pub(crate) touch_stick_center_x: f32,
+    pub(crate) touch_stick_center_y: f32,
+    pub(crate) touch_stick_radius: f32,
+    pub(crate) touch_stick_travel: f32,
+    pub(crate) touch_stick_enabled: bool,
+    pub(crate) touch_stick_unlocked: bool,
 }
 
 impl Model {
@@ -1498,6 +1511,12 @@ impl Model {
             reputation_selected: None,
             reputation_sends: Vec::new(),
             gamepad: GamepadLuaState::default(),
+            touch_stick_center_x: 132.0,
+            touch_stick_center_y: 136.0,
+            touch_stick_radius: 112.0,
+            touch_stick_travel: 71.0,
+            touch_stick_enabled: true,
+            touch_stick_unlocked: false,
         }
     }
 

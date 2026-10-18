@@ -107,16 +107,20 @@ local function GetDisplayActionSlot(controllerSlot)
         return controllerSlot + 16
     end
 
-    -- Match the native WoW action bar's current bonus-bar offset.
-    -- This lets the base 8 controller buttons follow stance/form pages
-    -- (for example, Warrior stance slots) without changing modifier layers.
-    -- Fall back to the normal 1-8 bar if this client doesn't expose the API.
+    -- In Benilla, GetBonusBarOffset() is a PAGE index, not an action-slot
+    -- offset: 0 = normal bar, 1..3 = Warrior stance pages. Vanilla's bonus
+    -- action slots start at 73, 85, 97 respectively (12 slots per page).
+    -- Keep the normal page at 1-8; map stance pages to their own native slots.
     local offset = 0
     if GetBonusBarOffset then
         offset = GetBonusBarOffset() or 0
     end
 
-    return controllerSlot + offset
+    if offset <= 0 then
+        return controllerSlot
+    end
+
+    return 60 + offset * 12 + controllerSlot
 end
 
 

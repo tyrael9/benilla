@@ -97,6 +97,8 @@ end
 
 local function GetDisplayActionSlot(controllerSlot)
 
+    -- Modifier layers deliberately remain fixed:
+    -- L = 9-16, R = 17-24, regardless of stance/form.
     if currentModifier == 1 then
         return controllerSlot + 8
     end
@@ -105,7 +107,16 @@ local function GetDisplayActionSlot(controllerSlot)
         return controllerSlot + 16
     end
 
-    return controllerSlot
+    -- Match the native WoW action bar's current bonus-bar offset.
+    -- This lets the base 8 controller buttons follow stance/form pages
+    -- (for example, Warrior stance slots) without changing modifier layers.
+    -- Fall back to the normal 1-8 bar if this client doesn't expose the API.
+    local offset = 0
+    if GetBonusBarOffset then
+        offset = GetBonusBarOffset() or 0
+    end
+
+    return controllerSlot + offset
 end
 
 

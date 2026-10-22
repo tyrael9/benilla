@@ -1019,8 +1019,17 @@ function BenillaController_Slot(
         return
     end
 
+    -- Bindings.xml supplies fixed slots 1-24. For the physical base layer
+    -- (1-8), resolve the same stance-aware slot used to draw the icon.
+    -- Modifier layers (9-24) are already explicit slots and must stay fixed.
+    local actualAction = action
+
+    if action >= 1 and action <= 8 then
+        actualAction = GetDisplayActionSlot(action)
+    end
+
     UseAction(
-        action,
+        actualAction,
         0,
         0
     )

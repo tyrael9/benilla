@@ -23,8 +23,138 @@ impl GamepadSnapshot {
     }
 
     pub(crate) fn look_axis(&self) -> Vec2 {
+        if self.current.zl > 0.5 {
+            Vec2::ZERO
+        } else {
+            self.virtual_mouse_axis()
+        }
+    }
+
+    pub(crate) fn virtual_mouse_axis(&self) -> Vec2 {
         apply_deadzone(Vec2::new(self.current.right_x, self.current.right_y), 0.15)
     }
+}
+
+/// The virtual mouse owned by LT mode. Its logical position survives releasing LT; the active
+/// window point is published for the UI walk and the world hover pick.
+#[derive(Resource, Clone, Copy, Debug, Default)]
+pub(crate) struct GamepadVirtualMouse {
+    active: bool,
+    initialized: bool,
+    position_ui: Vec2,
+    pub(crate) window_position: Option<Vec2>,
+    left_down: bool,
+    right_down: bool,
+}
+
+fn advance_virtual_mouse(position: Vec2, stick: Vec2, delta_secs: f32, bounds: Vec2) -> Vec2 {
+    let delta = Vec2::new(stick.x, -stick.y) * 700.0 * delta_secs.max(0.0);
+    (position + delta).clamp(Vec2::ZERO, bounds.max(Vec2::ZERO))
+}
+
+fn pointer_record(record: crate::ui_script::Record, at: Vec2) -> crate::ui_script::InputRecord {
+    crate::ui_script::InputRecord {
+        record,
+        mods: Default::default(),
+        at: Some(at),
+    }
+}
+
+/// Synthesizes pointer records after the OS records have been collected, preserving the normal UI
+/// and world-click path. While LT is held, real mouse records are ignored and the right stick
+/// moves the virtual cursor instead.
+fn update_gamepad_virtual_mouse(
+    snapshot: Res<GamepadSnapshot>,
+    mut mouse: ResMut<GamepadVirtualMouse>,
+    mut records: ResMut<crate::ui_script::InputRecords>,
+    window: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    widescreen: Option<Res<crate::video::Widescreen>>,
+    time: Res<Time>,
+) {
+    use bevy::input::ButtonState;
+    use bevy::input::mouse::MouseButton;
+    use crate::ui_script::{Record, UiScreen};
+
+    let active = snapshot.current.connected && snapshot.current.zl > 0.5;
+    if !active {
+        if mouse.active {
+            if let Some(at) = mouse.window_position {
+                let mut release = Vec::new();
+                if mouse.left_down {
+                    release.push(pointer_record(
+                        Record::Button { button: MouseButton::Left, state: ButtonState::Released },
+                        at,
+                    ));
+                }
+                if mouse.right_down {
+                    release.push(pointer_record(
+                        Record::Button { button: MouseButton::Right, state: ButtonState::Released },
+                        at,
+                    ));
+                }
+                // Release the virtual buttons before this frame's real mouse events.
+                records.inject_gamepad_pointer(release, false, true);
+            }
+            mouse.left_down = false;
+            mouse.right_down = false;
+        }
+        mouse.active = false;
+        mouse.window_position = None;
+        return;
+    }
+
+    let Ok(window) = window.single() else {
+        return;
+    };
+    let screen = UiScreen::of_window(window, widescreen.as_deref().is_none_or(|w| w.0));
+    let scale = crate::ui_script::seam_scale(screen.size.y);
+    let bounds = screen.size / scale;
+    if !mouse.initialized {
+        mouse.position_ui = bounds * 0.5;
+        mouse.initialized = true;
+    }
+
+    let previous_window_position = mouse.window_position;
+    mouse.position_ui = advance_virtual_mouse(
+        mouse.position_ui,
+        snapshot.virtual_mouse_axis(),
+        time.delta_secs(),
+        bounds,
+    );
+    let at = crate::ui_script::ui_to_window(screen, mouse.position_ui);
+    let entered = !mouse.active;
+    let moved = previous_window_position
+        .is_none_or(|previous| previous.distance_squared(at) > 0.01);
+
+    let mut generated = Vec::new();
+    if entered || moved {
+        generated.push(pointer_record(Record::Move, at));
+    }
+    if snapshot.current.a != mouse.left_down {
+        generated.push(pointer_record(
+            Record::Button {
+                button: MouseButton::Left,
+                state: if snapshot.current.a { ButtonState::Pressed } else { ButtonState::Released },
+            },
+            at,
+        ));
+    }
+    if snapshot.current.b != mouse.right_down {
+        generated.push(pointer_record(
+            Record::Button {
+                button: MouseButton::Right,
+                state: if snapshot.current.b { ButtonState::Pressed } else { ButtonState::Released },
+            },
+            at,
+        ));
+    }
+
+    // Do not let an OS mouse move/click race the LT-controlled virtual pointer.
+    records.inject_gamepad_pointer(generated, true, false);
+    mouse.active = true;
+    mouse.window_position = Some(at);
+    mouse.left_down = snapshot.current.a;
+    mouse.right_down = snapshot.current.b;
 }
 
 fn apply_deadzone(value: Vec2, deadzone: f32) -> Vec2 {
@@ -362,9 +492,17 @@ impl Plugin for GamepadBridgePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GamepadSnapshot>()
             .init_resource::<GamepadBindings>()
+            .init_resource::<GamepadVirtualMouse>()
             .add_systems(
                 Update,
                 poll_platform_gamepad.before(crate::bindings::BindingHead),
+            )
+            .add_systems(
+                Update,
+                update_gamepad_virtual_mouse
+                    .after(poll_platform_gamepad)
+                    .after(crate::ui_script::collect_input_records)
+                    .before(crate::ui_script::UiInputViews),
             )
             .add_systems(
                 Update,
@@ -564,6 +702,33 @@ mod tests {
         };
         assert_eq!(snapshot.move_axis(), Vec2::Y);
         assert_eq!(snapshot.look_axis(), Vec2::X);
+    }
+
+    #[test]
+    fn left_trigger_routes_the_right_stick_to_the_virtual_mouse() {
+        let snapshot = GamepadSnapshot {
+            current: GamepadLuaState {
+                connected: true,
+                zl: 1.0,
+                right_x: 0.75,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(snapshot.look_axis(), Vec2::ZERO);
+        assert_ne!(snapshot.virtual_mouse_axis(), Vec2::ZERO);
+    }
+
+    #[test]
+    fn virtual_mouse_motion_uses_ui_y_up_and_clamps_to_the_screen() {
+        assert_eq!(
+            advance_virtual_mouse(Vec2::new(10.0, 20.0), Vec2::new(1.0, 1.0), 0.1, Vec2::splat(100.0)),
+            Vec2::new(80.0, 0.0)
+        );
+        assert_eq!(
+            advance_virtual_mouse(Vec2::new(95.0, 95.0), Vec2::new(1.0, -1.0), 0.1, Vec2::splat(100.0)),
+            Vec2::splat(100.0)
+        );
     }
 
     #[test]

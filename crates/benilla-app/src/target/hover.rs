@@ -515,6 +515,7 @@ pub(super) fn update_hover(
     window: Query<&Window, With<PrimaryWindow>>,
     rig: Res<CameraControl>,
     pointer_over_ui: Res<PointerOverUi>,
+    virtual_mouse: Option<Res<crate::gamepad::GamepadVirtualMouse>>,
     occlusion: Res<PickOcclusion>,
     // The unit whose plate holds the hover after this frame's UI walk.
     plate_hover: Res<crate::vplates::PlateHover>,
@@ -539,7 +540,11 @@ pub(super) fn update_hover(
         sticky.unit = None;
         return;
     }
-    let Some(cursor) = window.single().ok().and_then(Window::cursor_position) else {
+    let cursor = virtual_mouse
+        .as_deref()
+        .and_then(|mouse| mouse.window_position)
+        .or_else(|| window.single().ok().and_then(Window::cursor_position));
+    let Some(cursor) = cursor else {
         return;
     };
     let Some(ray) = cursor_ray(&camera, cursor) else {
@@ -925,6 +930,7 @@ pub(super) fn update_hovered_object(
     window: Query<&Window, With<PrimaryWindow>>,
     rig: Res<CameraControl>,
     pointer_over_ui: Res<PointerOverUi>,
+    virtual_mouse: Option<Res<crate::gamepad::GamepadVirtualMouse>>,
     occlusion: Res<PickOcclusion>,
     // The unit pick, earlier in the chain: a unit hover keeps the GameObject halo shut.
     unit_hovered: Res<Hovered>,
@@ -947,7 +953,12 @@ pub(super) fn update_hovered_object(
     if yielded {
         return;
     }
-    let Some(cursor) = window.cursor_position().or(probe_aim) else {
+    let Some(cursor) = virtual_mouse
+        .as_deref()
+        .and_then(|mouse| mouse.window_position)
+        .or_else(|| window.cursor_position())
+        .or(probe_aim)
+    else {
         return;
     };
     let Ok(ray) = cam.0.viewport_to_world(cam.1, cursor) else {

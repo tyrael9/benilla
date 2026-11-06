@@ -306,7 +306,7 @@ impl TargetScan<'_, '_> {
                     store.0.gameobject_faction(),
                     self.self_store(),
                 );
-                let template = gate.templates.get(guid);
+                let template = gate.templates.of(&store.0);
                 let overrides = super::cursor_mode::GoOverrides {
                     channel_owned: super::cursor_mode::fishing_channel_owned(
                         self.self_store(),

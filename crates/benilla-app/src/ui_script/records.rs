@@ -67,6 +67,23 @@ impl InputRecords {
     pub(crate) fn iter(&self) -> impl DoubleEndedIterator<Item = &InputRecord> {
         self.records.iter()
     }
+
+    pub(crate) fn inject_gamepad_pointer(
+        &mut self,
+        generated: Vec<InputRecord>,
+        suppress_window_pointer: bool,
+        prepend: bool,
+    ) {
+        if suppress_window_pointer {
+            self.records
+                .retain(|record| matches!(record.record, Record::Key(_)));
+        }
+        if prepend {
+            self.records.splice(0..0, generated);
+        } else {
+            self.records.extend(generated);
+        }
+    }
 }
 
 /// The eight keys the modifier mask is made of.

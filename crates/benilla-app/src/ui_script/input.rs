@@ -214,6 +214,8 @@ pub(super) fn feed_ui_input(
     state: Option<Res<State<crate::client_state::ClientState>>>,
     // The characters the active layout makes, which name a key for a keyboard frame.
     layout: Res<crate::bindings::LayoutNames>,
+    // LT's pointer owns the cursor position while the virtual mouse is active.
+    gamepad_mouse: Option<Res<crate::gamepad::GamepadVirtualMouse>>,
     // Lent to the VM for the pass, so a click's, a key's or a binding's script calls apply in the
     // call, the world click's arm picking inside it.
     mut host: crate::script_calls::InputHost,
@@ -306,7 +308,12 @@ pub(super) fn feed_ui_input(
         alt: keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight),
         sup: keys.pressed(KeyCode::SuperLeft) || keys.pressed(KeyCode::SuperRight),
     };
-    let end = ui_point(window.cursor_position());
+    let end = ui_point(
+        gamepad_mouse
+            .as_deref()
+            .and_then(|mouse| mouse.window_position)
+            .or_else(|| window.cursor_position()),
+    );
     let walk = &mut *walk;
     let feed = |script: &mut UiScript| {
         // The pick routes the world drop: an object keeps the payload, terrain or sky drops it.

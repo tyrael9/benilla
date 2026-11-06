@@ -230,6 +230,7 @@ mod tests {
         world.init_resource::<crate::net::Reputations>();
         world.init_resource::<super::super::AssistAttack>();
         world.init_resource::<super::super::Selection>();
+        world.init_resource::<super::super::InteractTarget>();
         world.init_resource::<crate::spell::SpellTargeting>();
         world.init_resource::<crate::spell::CursorPicks>();
         world.init_resource::<crate::spell::targeting::EnchantConfirmItem>();

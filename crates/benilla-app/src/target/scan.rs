@@ -92,6 +92,8 @@ struct Candidate {
     kind: EntityKind,
     on_screen: bool,
     score: f32,
+    /// Party/subgroup first for Friend scans, followed by other raid members.
+    friend_priority: u8,
 }
 
 /// Off-centerness (none off-screen) plus normalized distance, minus the fighting-me bonus.
@@ -108,6 +110,7 @@ fn priority_score(off_center: Option<f32>, dist: f32, range: f32, combat_with_me
 fn candidate_order(a: &Candidate, b: &Candidate) -> std::cmp::Ordering {
     b.on_screen
         .cmp(&a.on_screen)
+        .then(a.friend_priority.cmp(&b.friend_priority))
         .then(a.score.total_cmp(&b.score))
 }
 
@@ -274,7 +277,10 @@ impl TargetScan<'_, '_> {
                 .group
                 .as_ref()
                 .is_some_and(|g| g.party_or_raid_member(guid)),
-            ScanSide::Interactable | ScanSide::Smart => false,
+            ScanSide::Interactable => false,
+            ScanSide::Smart => {
+                pair.is_some_and(|(me, unit)| rel.can_attack(&me, &unit))
+            },
         }
     }
 
@@ -347,6 +353,28 @@ impl TargetScan<'_, '_> {
         self.index.as_ref()?.0.get(&guid).copied()
     }
 
+    fn friend_priority(&self, side: ScanSide, guid: u64) -> u8 {
+        if side != ScanSide::Friend {
+            return 2;
+        }
+
+        let Some(group) = self.group.as_ref() else {
+            return 2;
+        };
+
+        // Own party/subgroup always wins.
+        if group.party_slots().any(|member| member.guid == guid) {
+            return 0;
+        }
+
+        // In a raid, other-subgroup members are the second tier.
+        if group.group_type == 1 && group.members.iter().any(|member| member.guid == guid) {
+            return 1;
+        }
+
+        2
+    }
+
     fn store_at(&self, entity: Entity) -> Option<&ObjectStore> {
         self.stores.get(entity).ok()
     }
@@ -408,7 +436,7 @@ impl TargetScan<'_, '_> {
                 ScanSide::Interactable => self.is_interactable(net.kind, guid_c.0, store),
                 ScanSide::Smart => {
                     if is_unit {
-                        self.is_valid(ScanSide::Enemy, guid_c.0, store)
+                        self.is_valid(ScanSide::Smart, guid_c.0, store)
                             || self.is_interactable(net.kind, guid_c.0, store)
                     } else {
                         self.is_interactable(net.kind, guid_c.0, store)
@@ -476,6 +504,7 @@ impl TargetScan<'_, '_> {
                 kind: net.kind,
                 on_screen: off_center.is_some(),
                 score,
+                friend_priority: self.friend_priority(side, guid_c.0),
             });
         }
         out.sort_by(candidate_order);
@@ -1840,6 +1869,7 @@ mod tests {
             kind: EntityKind::Unit,
             on_screen,
             score,
+            friend_priority: 2,
         }
     }
 

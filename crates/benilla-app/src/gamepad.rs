@@ -56,6 +56,14 @@ pub(crate) struct GamepadBindings {
     modifier_initialized: bool,
 }
 
+impl GamepadBindings {
+    /// Drop held command edges and re-seed the modifier when the active Lua VM is replaced.
+    pub(crate) fn reset_for_vm(&mut self) {
+        self.latched.clear();
+        self.modifier_initialized = false;
+    }
+}
+
 #[cfg(not(target_os = "ios"))]
 pub(crate) struct SdlGamepad {
     // Drop open handles before the SDL context they depend on.
@@ -313,7 +321,7 @@ impl Plugin for GamepadBridgePlugin {
 
 #[cfg(not(target_os = "ios"))]
 fn poll_platform_gamepad(
-    gamepad: Option<NonSend<SdlGamepad>>,
+    mut gamepad: Option<NonSendMut<SdlGamepad>>,
     mut snapshot: ResMut<GamepadSnapshot>,
 ) {
     let Some(mut gamepad) = gamepad else {

@@ -69,7 +69,7 @@ jobs:
   windows:
     # The workspace tests on a Windows checkout, which no macOS or Linux gate runs: path separators,
     # line endings and platform seams fail here first.
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name != github.repository
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
     runs-on: windows-latest
     timeout-minutes: 180
     env:

@@ -184,6 +184,7 @@ fn inject_touch_input(
             ui.right_down = true;
         }
     }
+    let mut pending_world_long_press_release = None;
     if let Some(world) = state.world.as_mut() {
         if !world.dragging
             && !world.right_down
@@ -196,9 +197,13 @@ fn inject_touch_input(
                 },
                 world.window_position,
             ));
-            state.pending_world_release = Some((MouseButton::Right, world.window_position));
+            pending_world_long_press_release =
+                Some((MouseButton::Right, world.window_position));
             world.right_down = true;
         }
+    }
+    if pending_world_long_press_release.is_some() {
+        state.pending_world_release = pending_world_long_press_release;
     }
 
     let touch_events: Vec<_> = events
@@ -908,7 +913,7 @@ impl Plugin for GamepadBridgePlugin {
 
 #[cfg(not(target_os = "ios"))]
 fn poll_platform_gamepad(
-    mut gamepad: Option<NonSendMut<SdlGamepad>>,
+    gamepad: Option<NonSendMut<SdlGamepad>>,
     mut snapshot: ResMut<GamepadSnapshot>,
 ) {
     let Some(mut gamepad) = gamepad else {

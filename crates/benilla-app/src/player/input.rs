@@ -230,7 +230,7 @@ pub(super) fn move_axes_with(
     // walks you backward. The auto-move is a held forward, W's own bit `0x100000` through W's
     // setter, so it nets against S like W and never trips the cancel set, which fires on key-down
     // edges.
-    let mut fwd_axis = state::forward_axis(
+    let fwd_axis = state::forward_axis(
         binds.pressed(crate::bindings::Input::MoveForward) || auto_forward,
         binds.pressed(crate::bindings::Input::MoveBackward),
         both_buttons,
@@ -248,7 +248,7 @@ pub(super) fn move_axes_with(
     let strafe_right = binds.pressed(crate::bindings::Input::StrafeRight);
     let turn_left = binds.pressed(crate::bindings::Input::TurnLeft);
     let turn_right = binds.pressed(crate::bindings::Input::TurnRight);
-    let mut side_axis = i32::from(strafe_right) - i32::from(strafe_left)
+    let side_axis = i32::from(strafe_right) - i32::from(strafe_left)
         + if mouselook {
             i32::from(turn_right) - i32::from(turn_left)
         } else {

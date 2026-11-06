@@ -59,8 +59,8 @@ mod field_callbacks;
 mod field_watch;
 mod fishing_line;
 mod footprints;
-mod gamepad;
 mod game_plugins;
+mod gamepad;
 mod glue_session;
 mod go_anim;
 mod go_templates;
@@ -297,9 +297,16 @@ fn launch(build: BuildId, extend: Option<Extension<'_>>) -> AppExit {
         Err(err) => return no_install::fail(&err, run_mode::unattended()),
     };
 
+    // SDL HID enumeration must happen before Bevy/winit starts its event loop.
+    // SDL objects are !Send on macOS, so the live handle is stored as a NonSend resource.
+    let sdl_gamepad = crate::gamepad::init_platform_gamepad();
+
     let mut app = App::new();
     // A command on an entity a same-frame despawn removed logs instead of aborting the session.
     app.set_error_handler(crash::command_error_handler);
+    if let Some(gamepad) = sdl_gamepad {
+        app.insert_non_send_resource(gamepad);
+    }
     // The panel footer and the build banner read the stamp back.
     app.insert_resource(build);
     // Static-scene transform tracking pinned on: the default threshold re-decides every frame with

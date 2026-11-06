@@ -641,7 +641,7 @@ mod tests {
                 &binds,
                 &mut player,
                 bevy::math::Vec2::ZERO,
-                player.face_yaw,
+                0.0,
                 false,
                 true,
                 true,

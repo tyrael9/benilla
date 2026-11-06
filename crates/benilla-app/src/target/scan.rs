@@ -289,13 +289,10 @@ impl TargetScan<'_, '_> {
                 if store.0.unit_is_dead() {
                     return store.0.unit_lootable();
                 }
-                self.pair(guid, Some(store)).is_some_and(|(me, unit)| {
-                    self.relations.get().can_interact(&me, &unit)
-                })
+                self.pair(guid, Some(store))
+                    .is_some_and(|(me, unit)| self.relations.get().can_interact(&me, &unit))
             }
-            EntityKind::Corpse => {
-                !store.0.corpse_is_bones() || store.0.corpse_lootable()
-            }
+            EntityKind::Corpse => !store.0.corpse_is_bones() || store.0.corpse_lootable(),
             EntityKind::GameObject => {
                 let Some(gate) = self.go_gate.as_ref() else {
                     return false;

@@ -572,7 +572,14 @@ mod tests {
         assert_eq!(r3_target_mode(base, true), NearestMode::Enemy);
         assert_eq!(r3_target_mode(base, false), NearestMode::Smart);
         assert_eq!(
-            r3_target_mode(GamepadLuaState { l: true, r: true, ..base }, true),
+            r3_target_mode(
+                GamepadLuaState {
+                    l: true,
+                    r: true,
+                    ..base
+                },
+                true
+            ),
             NearestMode::Friend,
             "LB takes priority when both shoulder modifiers are held"
         );

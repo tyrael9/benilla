@@ -111,8 +111,7 @@ impl ScriptSelect<'_, '_> {
         reverse: bool,
     ) -> SelectDebt {
         let now = self.time.elapsed_secs_f64();
-        let (scan, history, interact) =
-            (&self.scan, &mut self.history, &mut self.interact);
+        let (scan, history, interact) = (&self.scan, &mut self.history, &mut self.interact);
         self.commit.owing(|commit| {
             let owed = scan::cycle(
                 scan::ScanSide::of(mode),

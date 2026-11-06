@@ -71,9 +71,9 @@ fn update_gamepad_virtual_mouse(
     widescreen: Option<Res<crate::video::Widescreen>>,
     time: Res<Time>,
 ) {
-    use bevy::input::ButtonState;
-    use bevy::input::mouse::MouseButton;
     use crate::ui_script::{Record, UiScreen};
+    use bevy::input::mouse::MouseButton;
+    use bevy::input::ButtonState;
 
     let active = snapshot.current.connected && snapshot.current.zl > 0.5;
     if !active {
@@ -82,13 +82,19 @@ fn update_gamepad_virtual_mouse(
                 let mut release = Vec::new();
                 if mouse.left_down {
                     release.push(pointer_record(
-                        Record::Button { button: MouseButton::Left, state: ButtonState::Released },
+                        Record::Button {
+                            button: MouseButton::Left,
+                            state: ButtonState::Released,
+                        },
                         at,
                     ));
                 }
                 if mouse.right_down {
                     release.push(pointer_record(
-                        Record::Button { button: MouseButton::Right, state: ButtonState::Released },
+                        Record::Button {
+                            button: MouseButton::Right,
+                            state: ButtonState::Released,
+                        },
                         at,
                     ));
                 }
@@ -106,7 +112,7 @@ fn update_gamepad_virtual_mouse(
     let Ok(window) = window.single() else {
         return;
     };
-    let screen = UiScreen::of_window(window, widescreen.as_deref().is_none_or(|w| w.0));
+    let screen = UiScreen::of_window(window, widescreen.as_deref());
     let scale = crate::ui_script::seam_scale(screen.size.y);
     let bounds = screen.size / scale;
     if !mouse.initialized {
@@ -123,8 +129,8 @@ fn update_gamepad_virtual_mouse(
     );
     let at = crate::ui_script::ui_to_window(screen, mouse.position_ui);
     let entered = !mouse.active;
-    let moved = previous_window_position
-        .is_none_or(|previous| previous.distance_squared(at) > 0.01);
+    let moved =
+        previous_window_position.is_none_or(|previous| previous.distance_squared(at) > 0.01);
 
     let mut generated = Vec::new();
     if entered || moved {
@@ -134,7 +140,11 @@ fn update_gamepad_virtual_mouse(
         generated.push(pointer_record(
             Record::Button {
                 button: MouseButton::Left,
-                state: if snapshot.current.a { ButtonState::Pressed } else { ButtonState::Released },
+                state: if snapshot.current.a {
+                    ButtonState::Pressed
+                } else {
+                    ButtonState::Released
+                },
             },
             at,
         ));
@@ -143,7 +153,11 @@ fn update_gamepad_virtual_mouse(
         generated.push(pointer_record(
             Record::Button {
                 button: MouseButton::Right,
-                state: if snapshot.current.b { ButtonState::Pressed } else { ButtonState::Released },
+                state: if snapshot.current.b {
+                    ButtonState::Pressed
+                } else {
+                    ButtonState::Released
+                },
             },
             at,
         ));
@@ -722,11 +736,21 @@ mod tests {
     #[test]
     fn virtual_mouse_motion_uses_ui_y_up_and_clamps_to_the_screen() {
         assert_eq!(
-            advance_virtual_mouse(Vec2::new(10.0, 20.0), Vec2::new(1.0, 1.0), 0.1, Vec2::splat(100.0)),
+            advance_virtual_mouse(
+                Vec2::new(10.0, 20.0),
+                Vec2::new(1.0, 1.0),
+                0.1,
+                Vec2::splat(100.0)
+            ),
             Vec2::new(80.0, 0.0)
         );
         assert_eq!(
-            advance_virtual_mouse(Vec2::new(95.0, 95.0), Vec2::new(1.0, -1.0), 0.1, Vec2::splat(100.0)),
+            advance_virtual_mouse(
+                Vec2::new(95.0, 95.0),
+                Vec2::new(1.0, -1.0),
+                0.1,
+                Vec2::splat(100.0)
+            ),
             Vec2::splat(100.0)
         );
     }

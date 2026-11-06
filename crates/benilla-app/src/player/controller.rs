@@ -310,6 +310,8 @@ pub(super) fn control(
         Res<view_subject::FarSight>,
         // The pitch latch the calls left, which the frame's writes of the latch supersede.
         Option<ResMut<super::press::CallPitch>>,
+        // The current normalized gamepad snapshot, read only by the input phase.
+        Res<crate::gamepad::GamepadSnapshot>,
     ),
     mut commands: Commands,
     mut player: ResMut<Player>,
@@ -610,10 +612,19 @@ pub(super) fn control(
                 info!("mouse: unmapped button Other({n}) — bindings know BUTTON4/BUTTON5 as winit Forward/Back");
             }
         }
-        let axes = input::move_axes(binds, &mut player, both_buttons, may_translate, may_turn);
+        let axes = input::move_axes(
+            binds,
+            &mut player,
+            speed_capsule.14.move_axis(),
+            cam.yaw,
+            both_buttons,
+            may_translate,
+            may_turn,
+        );
         let input::MoveAxes {
             fwd: fwd_axis,
             side: side_axis,
+            analog,
             mouselook,
             turning,
             translating,
@@ -621,7 +632,7 @@ pub(super) fn control(
             turn_right,
             ..
         } = axes;
-        if fwd_axis != 0 || side_axis != 0 {
+        if fwd_axis != 0 || side_axis != 0 || analog != Vec2::ZERO {
             net.12.moved();
         }
         if mouselook {
@@ -675,6 +686,9 @@ pub(super) fn control(
             -1 => dir -= move_right,
             _ => {}
         }
+        if analog != Vec2::ZERO {
+            dir = dir.normalize_or_zero();
+        }
         // Translation dies here, but a root leaves turning live: the reference's allow-list permits
         // the turn, pitch, run/walk and SetFacing commands (`0x615c71`, `0x618054`). A stun, which
         // vmangos applies with a root (`SpellAuras.cpp:3502`), or death stops the turn as well.
@@ -726,7 +740,7 @@ pub(super) fn control(
         // `GetCurrentSpeed` (`0x7c4c90`), shared with the remote extrapolator: the walk arm comes
         // before the backward min, so walking backwards is walk speed. It takes this frame's gait
         // intent, since the wire word is built after the mover.
-        let speed = crate::net::current_speed(
+        let mut speed = crate::net::current_speed(
             &speeds,
             if net_backward {
                 move_flags::BACKWARD
@@ -738,6 +752,9 @@ pub(super) fn control(
                 0
             },
         );
+        if analog != Vec2::ZERO {
+            speed *= analog.length();
+        }
         // `Jump` (`0x513bd0`) inlines `0x5144e0` and `0x514560`, which is `may_translate` term for
         // term: health, root and stand state 7. Hover's refusal is the movement handler's
         // (`0x7c623a`), which keeps the mounted flourish reachable while hovering.
@@ -809,7 +826,7 @@ pub(super) fn control(
         let pitch_integrating = if swimming {
             swim_fwd != 0.0 || swim_side != 0.0
         } else {
-            (may_translate && (fwd_axis != 0 || side_axis != 0)) || player.airborne_since.is_some()
+            (may_translate && (fwd_axis != 0 || side_axis != 0 || analog != Vec2::ZERO)) || player.airborne_since.is_some()
         };
         swim::integrate_pitch_keys(&mut player, turn_rate, pitch_integrating, dt);
 

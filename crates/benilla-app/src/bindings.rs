@@ -996,8 +996,7 @@ fn end_dispatch(
             .as_deref_mut()
             .is_some_and(|script| gamepad_vm.claim(script));
         if vm_changed {
-            gamepad_bindings.latched.clear();
-            gamepad_bindings.modifier_initialized = false;
+            gamepad_bindings.reset_for_vm();
         }
         crate::gamepad::dispatch_action_bindings(
             script.as_deref_mut(),

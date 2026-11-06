@@ -109,6 +109,8 @@ pub(super) struct MoveAxes {
     pub mouselook: bool,
     /// A keyboard turn is held and allowed (a stun refuses it).
     pub turning: bool,
+    /// The analog left stick after its radial deadzone.
+    pub analog: Vec2,
     /// The reference's `flags & 0xf`, off the net axes: W+S neither streams nor moves.
     pub translating: bool,
     /// The raw strafe and turn keys, for the swim amounts and the wire's turn bits.
@@ -146,6 +148,8 @@ pub(super) fn toggle_autorun(
 pub(super) fn move_axes(
     binds: &crate::bindings::BindingsState,
     player: &mut Player,
+    analog: Vec2,
+    camera_yaw: f32,
     both_buttons: bool,
     // The reference's input predicates `0x514560` and `0x5145b0` (`state::may_translate`,
     // `state::may_turn`); death takes both down.
@@ -211,7 +215,7 @@ pub(super) fn move_axes_with(
     // walks you backward. The auto-move is a held forward, W's own bit `0x100000` through W's
     // setter, so it nets against S like W and never trips the cancel set, which fires on key-down
     // edges.
-    let fwd_axis = state::forward_axis(
+    let mut fwd_axis = state::forward_axis(
         binds.pressed(crate::bindings::Input::MoveForward) || auto_forward,
         binds.pressed(crate::bindings::Input::MoveBackward),
         both_buttons,
@@ -229,7 +233,7 @@ pub(super) fn move_axes_with(
     let strafe_right = binds.pressed(crate::bindings::Input::StrafeRight);
     let turn_left = binds.pressed(crate::bindings::Input::TurnLeft);
     let turn_right = binds.pressed(crate::bindings::Input::TurnRight);
-    let side_axis = i32::from(strafe_right) - i32::from(strafe_left)
+    let mut side_axis = i32::from(strafe_right) - i32::from(strafe_left)
         + if mouselook {
             i32::from(turn_right) - i32::from(turn_left)
         } else {
@@ -238,12 +242,23 @@ pub(super) fn move_axes_with(
     // A keyboard turn yaws left-positive, like the mouse, and never while `may_turn` is down: the
     // reference skips its turn emitter `0x514f50`, and stops one in flight, behind `0x514755`. A
     // corpse fails the precondition both predicates share (`0x5144e0`), so it cannot turn either.
+    let analog = apply_deadzone(analog, 0.15);
+    if analog != Vec2::ZERO {
+        // The left stick has WASD semantics, but faces the camera rather than turning in place.
+        fwd_axis = discrete_axis(analog.y);
+        side_axis = discrete_axis(analog.x);
+        if may_turn {
+            player.face_yaw = camera_yaw;
+        }
+    }
+
     let turning = !mouselook && may_turn && (turn_left || turn_right);
-    let translating = fwd_axis != 0 || side_axis != 0;
+    let translating = fwd_axis != 0 || side_axis != 0 || analog != Vec2::ZERO;
 
     MoveAxes {
         fwd: fwd_axis,
         side: side_axis,
+        analog,
         mouselook,
         turning,
         translating,
@@ -252,6 +267,23 @@ pub(super) fn move_axes_with(
         turn_left,
         turn_right,
     }
+}
+
+fn discrete_axis(value: f32) -> i32 {
+    if value.abs() < 0.15 {
+        0
+    } else {
+        value.signum() as i32
+    }
+}
+
+fn apply_deadzone(value: Vec2, deadzone: f32) -> Vec2 {
+    let magnitude = value.length();
+    if magnitude <= deadzone {
+        return Vec2::ZERO;
+    }
+    let direction = value / magnitude;
+    direction * ((magnitude - deadzone) / (1.0 - deadzone)).clamp(0.0, 1.0)
 }
 
 /// The transition into both mouse bits held (`0x514a73`, `0x5150e2`): a primary bit rose with the

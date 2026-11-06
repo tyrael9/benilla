@@ -245,7 +245,6 @@ pub(crate) fn dispatch_action_bindings(
     }
 }
 
-
 /// The one-shot controller commands which already belong to WoW's binding or UI input paths.
 pub(crate) fn dispatch_utility_bindings(
     script: Option<&mut UiScript>,

@@ -973,8 +973,15 @@ fn end_dispatch(
     keys: Res<ButtonInput<KeyCode>>,
     buttons: Res<ButtonInput<MouseButton>>,
     mut latches: ResMut<BindingLatches>,
+    gamepad: Res<crate::gamepad::GamepadSnapshot>,
+    mut gamepad_bindings: ResMut<crate::gamepad::GamepadBindings>,
 ) {
     vm.run(|mut script| {
+        crate::gamepad::dispatch_action_bindings(
+            script.as_deref_mut(),
+            &gamepad,
+            &mut gamepad_bindings,
+        );
         // ── The stuck-latch sweep ── a release the window never saw: a latch whose base key reads
         // up unlatches now and runs its up-half. The reference's two bulk clears land here too,
         // since bevy zeroes `ButtonInput` for both (see `begin_dispatch`). UI keyboard focus never

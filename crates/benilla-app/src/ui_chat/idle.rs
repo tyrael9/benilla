@@ -533,6 +533,7 @@ mod tests {
                     phase: bevy::input::touch::TouchPhase::Started,
                     position: Vec2::new(100.0, 200.0),
                     window: Entity::PLACEHOLDER,
+                    force: None,
                 });
             }),
             touched,

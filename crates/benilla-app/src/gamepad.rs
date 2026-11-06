@@ -207,22 +207,20 @@ fn inject_touch_input(
         .collect();
     for (id, phase, raw) in touch_events {
         let ui = to_ui(raw);
-        let hit = script.as_deref().and_then(|s| s.hit_test(ui.x, ui.y));
-        let hit_name = script.as_deref().and_then(|s| s.hit_test_name(ui.x, ui.y));
-        let hit_ui = hit.is_some_and(|frame| {
-            script.as_deref().is_some_and(|s| !s.is_world_frame(frame))
-                && (stick.5 || hit_name.as_deref() != Some("BenillaMobileTouchStick"))
-        });
+        let interactive_ui = script
+            .as_deref()
+            .is_some_and(|s| s.hit_test_is_interactive(ui.x, ui.y));
         let in_stick = stick.4 && !stick.5 && touch_stick_contains(ui, centre, stick.2);
+        let claimable_stick = in_stick && (stick.5 || !interactive_ui);
         let can_route_ui = !lt_owns_pointer && state.ui.is_none();
 
         match phase {
             TouchPhase::Started => {
-                let claim_move = in_stick && !hit_ui && state.move_id.is_none();
+                let claim_move = claimable_stick && state.move_id.is_none();
                 if claim_move {
                     state.move_id = Some(id);
                     state.move_axis = touch_stick_axes(ui, centre, stick.3);
-                } else if can_route_ui && hit_ui {
+                } else if can_route_ui && interactive_ui {
                     state.ui = Some(UiTouchGesture {
                         id,
                         started_at: time.elapsed_secs(),

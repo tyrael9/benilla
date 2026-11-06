@@ -157,7 +157,7 @@ pub(super) fn move_axes(
     may_turn: bool,
 ) -> MoveAxes {
     let auto_forward = player.auto_forward;
-    move_axes_with(
+    let mut axes = move_axes_with(
         binds,
         &mut player.autorun,
         auto_forward,
@@ -165,7 +165,20 @@ pub(super) fn move_axes(
         both_buttons,
         may_translate,
         may_turn,
-    )
+    );
+
+    // The caller supplies the already-deadzoned SDL/GameController left stick. It uses
+    // WASD semantics and faces the camera while moving, rather than using A/D turn bindings.
+    if analog != Vec2::ZERO {
+        axes.fwd = discrete_axis(analog.y);
+        axes.side = discrete_axis(analog.x);
+        if may_turn {
+            player.face_yaw = camera_yaw;
+        }
+    }
+    axes.analog = analog;
+    axes.translating = axes.fwd != 0 || axes.side != 0 || analog != Vec2::ZERO;
+    axes
 }
 
 /// [`move_axes`] over the autorun bit `autorun` and the auto-move's forward `auto_forward`: a
@@ -242,23 +255,13 @@ pub(super) fn move_axes_with(
     // A keyboard turn yaws left-positive, like the mouse, and never while `may_turn` is down: the
     // reference skips its turn emitter `0x514f50`, and stops one in flight, behind `0x514755`. A
     // corpse fails the precondition both predicates share (`0x5144e0`), so it cannot turn either.
-    let analog = apply_deadzone(analog, 0.15);
-    if analog != Vec2::ZERO {
-        // The left stick has WASD semantics, but faces the camera rather than turning in place.
-        fwd_axis = discrete_axis(analog.y);
-        side_axis = discrete_axis(analog.x);
-        if may_turn {
-            player.face_yaw = camera_yaw;
-        }
-    }
-
     let turning = !mouselook && may_turn && (turn_left || turn_right);
-    let translating = fwd_axis != 0 || side_axis != 0 || analog != Vec2::ZERO;
+    let translating = fwd_axis != 0 || side_axis != 0;
 
     MoveAxes {
         fwd: fwd_axis,
         side: side_axis,
-        analog,
+        analog: Vec2::ZERO,
         mouselook,
         turning,
         translating,

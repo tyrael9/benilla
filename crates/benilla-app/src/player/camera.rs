@@ -1337,6 +1337,8 @@ pub(super) fn run_look_session(
     run_look_session_with_gamepad(
         mouse_motion,
         Vec2::ZERO,
+        Vec2::ZERO,
+        false,
         rig,
         cam,
         face_yaw,
@@ -1355,6 +1357,8 @@ pub(super) fn run_look_session(
 pub(super) fn run_look_session_with_gamepad(
     mouse_motion: &AccumulatedMouseMotion,
     gamepad_look: Vec2,
+    touch_look_delta: Vec2,
+    touch_look_active: bool,
     rig: &mut CameraControl,
     cam: &mut FlyCam,
     face_yaw: &mut f32,
@@ -1387,7 +1391,12 @@ pub(super) fn run_look_session_with_gamepad(
     // input and does not arm or spend a world-click gesture.
     let mouse_delta = if word_held { mouse_delta } else { Vec2::ZERO };
     const GAMEPAD_LOOK_SPEED: f32 = 6.0;
-    let motion = mouse_delta + gamepad_look * GAMEPAD_LOOK_SPEED;
+    let touch_delta = if touch_look_active {
+        touch_look_delta
+    } else {
+        Vec2::ZERO
+    };
+    let motion = mouse_delta + touch_delta + gamepad_look * GAMEPAD_LOOK_SPEED;
     let (toggles, release_sticky, owed) = rig.world_mouse.take_session_edges();
     // The armed click accumulates the rotation the press asked for, charged before the pitch
     // clamp: the reference accumulates raw motion, so a drag pinned at the pitch limit still spends
@@ -1468,7 +1477,7 @@ pub(super) fn run_look_session_with_gamepad(
 
     // Look rotation; a right-drag also turns the character.
     let mut handed = false;
-    if rig.look.is_some() || gamepad_look != Vec2::ZERO {
+    if rig.look.is_some() || gamepad_look != Vec2::ZERO || touch_look_active {
         let delta = motion;
         // A mouse turn sets mode bit 6 (`0x50fee9`).
         rig.view_moved |= delta != Vec2::ZERO;

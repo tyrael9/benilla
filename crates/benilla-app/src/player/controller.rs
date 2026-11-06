@@ -203,6 +203,8 @@ pub(super) fn sample_look(
     let looked = camera::run_look_session_with_gamepad(
         &pointer.0,
         pointer.5.look_axis(),
+        pointer.5.touch_look_delta,
+        pointer.5.touch_look_active,
         &mut rig,
         &mut cam,
         &mut player.face_yaw,

@@ -216,6 +216,8 @@ pub(super) fn feed_ui_input(
     layout: Res<crate::bindings::LayoutNames>,
     // LT's pointer owns the cursor position while the virtual mouse is active.
     gamepad_mouse: Option<Res<crate::gamepad::GamepadVirtualMouse>>,
+    // A UI-owned touch stays seated at its last position between TouchMoved messages.
+    gamepad_state: Option<Res<crate::gamepad::GamepadSnapshot>>,
     // Lent to the VM for the pass, so a click's, a key's or a binding's script calls apply in the
     // call, the world click's arm picking inside it.
     mut host: crate::script_calls::InputHost,
@@ -309,9 +311,14 @@ pub(super) fn feed_ui_input(
         sup: keys.pressed(KeyCode::SuperLeft) || keys.pressed(KeyCode::SuperRight),
     };
     let end = ui_point(
-        gamepad_mouse
+        gamepad_state
             .as_deref()
-            .and_then(|mouse| mouse.window_position)
+            .and_then(|state| state.touch_ui_pointer)
+            .or_else(|| {
+                gamepad_mouse
+                    .as_deref()
+                    .and_then(|mouse| mouse.window_position)
+            })
             .or_else(|| window.cursor_position()),
     );
     let walk = &mut *walk;

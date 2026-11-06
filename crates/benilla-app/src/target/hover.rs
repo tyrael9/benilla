@@ -516,6 +516,7 @@ pub(super) fn update_hover(
     rig: Res<CameraControl>,
     pointer_over_ui: Res<PointerOverUi>,
     virtual_mouse: Option<Res<crate::gamepad::GamepadVirtualMouse>>,
+    gamepad_state: Option<Res<crate::gamepad::GamepadSnapshot>>,
     occlusion: Res<PickOcclusion>,
     // The unit whose plate holds the hover after this frame's UI walk.
     plate_hover: Res<crate::vplates::PlateHover>,
@@ -540,9 +541,14 @@ pub(super) fn update_hover(
         sticky.unit = None;
         return;
     }
-    let cursor = virtual_mouse
+    let cursor = gamepad_state
         .as_deref()
-        .and_then(|mouse| mouse.window_position)
+        .and_then(|state| state.touch_world_pointer)
+        .or_else(|| {
+            virtual_mouse
+                .as_deref()
+                .and_then(|mouse| mouse.window_position)
+        })
         .or_else(|| window.single().ok().and_then(Window::cursor_position));
     let Some(cursor) = cursor else {
         return;
@@ -953,9 +959,14 @@ pub(super) fn update_hovered_object(
     if yielded {
         return;
     }
-    let Some(cursor) = virtual_mouse
+    let Some(cursor) = gamepad_state
         .as_deref()
-        .and_then(|mouse| mouse.window_position)
+        .and_then(|state| state.touch_world_pointer)
+        .or_else(|| {
+            virtual_mouse
+                .as_deref()
+                .and_then(|mouse| mouse.window_position)
+        })
         .or_else(|| window.cursor_position())
         .or(probe_aim)
     else {

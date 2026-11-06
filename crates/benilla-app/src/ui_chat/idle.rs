@@ -528,13 +528,14 @@ mod tests {
         );
         assert_eq!(
             stamped(&|app| {
-                app.world_mut().write_message(bevy::input::touch::TouchInput {
-                    id: 1,
-                    phase: bevy::input::touch::TouchPhase::Started,
-                    position: Vec2::new(100.0, 200.0),
-                    window: Entity::PLACEHOLDER,
-                    force: None,
-                });
+                app.world_mut()
+                    .write_message(bevy::input::touch::TouchInput {
+                        id: 1,
+                        phase: bevy::input::touch::TouchPhase::Started,
+                        position: Vec2::new(100.0, 200.0),
+                        window: Entity::PLACEHOLDER,
+                        force: None,
+                    });
             }),
             touched,
             "a touch also stamps the idle clock on mobile"

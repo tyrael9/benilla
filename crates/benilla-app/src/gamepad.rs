@@ -58,8 +58,11 @@ pub(crate) struct GamepadBindings {
 
 #[cfg(not(target_os = "ios"))]
 pub(crate) struct SdlGamepad {
+    // Drop open handles before the SDL context they depend on.
+    gamepad: Option<Gamepad>,
+    subsystem: sdl3::GamepadSubsystem,
+    gamepad_index: usize,
     _sdl: sdl3::Sdl,
-    gamepad: Gamepad,
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -86,27 +89,39 @@ pub(crate) fn init_platform_gamepad() -> Option<SdlGamepad> {
             return None;
         }
     };
-    let ids = match subsystem.gamepads() {
-        Ok(ids) => ids,
+
+    // Keep SDL alive even when no controller is present at launch. SDL may report devices
+    // only after the window/event loop starts; poll_platform_gamepad re-enumerates on disconnect
+    // and hot-plugs, using the same selected device index.
+    let gamepad = match subsystem.gamepads() {
+        Ok(ids) => match ids.get(gamepad_index).copied() {
+            Some(id) => match subsystem.open(id) {
+                Ok(gamepad) => {
+                    info!("gamepad: opened controller at index {gamepad_index}");
+                    Some(gamepad)
+                }
+                Err(error) => {
+                    warn!("gamepad: opening controller failed: {error}");
+                    None
+                }
+            },
+            None => {
+                info!("gamepad: no controller at index {gamepad_index}; waiting for hot-plug");
+                None
+            }
+        },
         Err(error) => {
             warn!("gamepad: enumerate gamepads failed: {error}");
-            return None;
-        }
-    };
-    let Some(id) = ids.get(gamepad_index).copied() else {
-        info!("gamepad: no controller at index {gamepad_index}");
-        return None;
-    };
-    match subsystem.open(id) {
-        Ok(gamepad) => {
-            info!("gamepad: opened controller at index {gamepad_index}");
-            Some(SdlGamepad { _sdl: sdl, gamepad })
-        }
-        Err(error) => {
-            warn!("gamepad: opening controller failed: {error}");
             None
         }
-    }
+    };
+
+    Some(SdlGamepad {
+        gamepad,
+        subsystem,
+        gamepad_index,
+        _sdl: sdl,
+    })
 }
 
 #[cfg(target_os = "ios")]
@@ -301,13 +316,46 @@ fn poll_platform_gamepad(
     gamepad: Option<NonSend<SdlGamepad>>,
     mut snapshot: ResMut<GamepadSnapshot>,
 ) {
-    let Some(gamepad) = gamepad else {
+    let Some(mut gamepad) = gamepad else {
         snapshot.previous = snapshot.current;
         snapshot.current = GamepadLuaState::default();
         return;
     };
-    gamepad.gamepad.subsystem().update();
-    let pad = &gamepad.gamepad;
+    gamepad.subsystem.update();
+
+    if gamepad
+        .gamepad
+        .as_ref()
+        .is_some_and(|pad| !pad.connected())
+    {
+        info!("gamepad: controller disconnected");
+        gamepad.gamepad = None;
+    }
+
+    if gamepad.gamepad.is_none() {
+        match gamepad.subsystem.gamepads() {
+            Ok(ids) => {
+                if let Some(id) = ids.get(gamepad.gamepad_index).copied() {
+                    match gamepad.subsystem.open(id) {
+                        Ok(pad) => {
+                            info!("gamepad: controller connected at index {}", gamepad.gamepad_index);
+                            gamepad.gamepad = Some(pad);
+                        }
+                        Err(error) => {
+                            warn!("gamepad: opening hot-plugged controller failed: {error}");
+                        }
+                    }
+                }
+            }
+            Err(error) => warn!("gamepad: hot-plug enumeration failed: {error}"),
+        }
+    }
+
+    let Some(pad) = gamepad.gamepad.as_ref() else {
+        snapshot.previous = snapshot.current;
+        snapshot.current = GamepadLuaState::default();
+        return;
+    };
     let left_x = normalize_axis(pad.axis(Axis::LeftX));
     let left_y = -normalize_axis(pad.axis(Axis::LeftY));
     let right_x = normalize_axis(pad.axis(Axis::RightX));

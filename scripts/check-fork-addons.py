@@ -56,7 +56,7 @@ def main() -> int:
             if counter not in transcript:
                 print(f"{addon}: expected {counter!r}; addon is not yet verified", file=sys.stderr)
                 return 1
-        if addon == "BenillaController" and "= PASS" not in transcript:
+        if addon == "BenillaController" and "\n    PASS\n" not in transcript:
             print("BenillaController: stance/action-slot regression probe did not pass", file=sys.stderr)
             return 1
     print("\nAll fork addons loaded and survived session startup.", flush=True)

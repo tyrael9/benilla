@@ -207,7 +207,11 @@ pub(crate) fn dispatch_action_bindings(
                 bindings.latched.push((button, command));
             }
         } else if !pressed && was_pressed {
-            if let Some(index) = bindings.latched.iter().position(|(held, _)| *held == button) {
+            if let Some(index) = bindings
+                .latched
+                .iter()
+                .position(|(held, _)| *held == button)
+            {
                 let (_, command) = bindings.latched.remove(index);
                 if let Err(error) = script.execute_binding(command, false) {
                     warn!("gamepad binding {command} release: {error}");
@@ -396,12 +400,15 @@ mod tests {
     fn app_snapshot_is_published_to_lua() {
         let mut app = App::new();
         app.insert_non_send_resource(UiScript::new().expect("in-game script"));
-        app.insert_resource(GamepadSnapshot { current: GamepadLuaState {
-            connected: true,
-            a: true,
-            left_x: 0.75,
+        app.insert_resource(GamepadSnapshot {
+            current: GamepadLuaState {
+                connected: true,
+                a: true,
+                left_x: 0.75,
+                ..Default::default()
+            },
             ..Default::default()
-        }, ..Default::default() });
+        });
 
         app.world_mut()
             .run_system_once(publish_gamepad_snapshot)

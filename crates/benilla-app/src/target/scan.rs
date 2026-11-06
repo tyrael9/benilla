@@ -980,6 +980,8 @@ pub(super) fn cycle(
     // past the pick whatever became of it; the history, which stands in for the index, records it
     // as visited without a selection to push.
     if front.takes(entity, guid, seam.slots.targeting()) {
+        interact.clear_target();
+        interact.bind_selection(selection.guid);
         if wrapped {
             history.visited.clear();
         }
@@ -996,8 +998,7 @@ pub(super) fn cycle(
 
     let (selection_changed, owed) = if matches!(kind, EntityKind::Unit | EntityKind::Player) {
         // Units use the normal WoW selection slot; leave no stale interaction target behind.
-        interact.target = None;
-        interact.guid = None;
+        interact.clear_target();
         let old_latches = latches_on(&scan.relations, selection.guid);
         let (out, owed) = commit_owing(
             selection,
@@ -1032,6 +1033,7 @@ pub(super) fn cycle(
             },
         )
     };
+    interact.bind_selection(selection.guid);
 
     if trace {
         info!(

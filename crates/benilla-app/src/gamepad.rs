@@ -490,9 +490,18 @@ fn gamepad_r3_target_nearest(
 fn gamepad_rt_interact(
     snapshot: Res<GamepadSnapshot>,
     selection: Res<crate::target::Selection>,
-    interact: Res<crate::target::InteractTarget>,
+    mut interact: ResMut<crate::target::InteractTarget>,
+    live_targets: Query<(), With<crate::net::Guid>>,
     mut interacts: MessageWriter<crate::target::Interact>,
 ) {
+    interact.reconcile_selection(selection.guid);
+    if interact
+        .target
+        .is_some_and(|target| live_targets.get(target).is_err())
+    {
+        interact.clear_target();
+    }
+
     if snapshot.current.zr > 0.5 && snapshot.previous.zr <= 0.5 {
         if let Some(target) = interact.target.or(selection.target) {
             interacts.write(crate::target::Interact(target));

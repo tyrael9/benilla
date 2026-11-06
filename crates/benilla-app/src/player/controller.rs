@@ -826,7 +826,8 @@ pub(super) fn control(
         let pitch_integrating = if swimming {
             swim_fwd != 0.0 || swim_side != 0.0
         } else {
-            (may_translate && (fwd_axis != 0 || side_axis != 0 || analog != Vec2::ZERO)) || player.airborne_since.is_some()
+            (may_translate && (fwd_axis != 0 || side_axis != 0 || analog != Vec2::ZERO))
+                || player.airborne_since.is_some()
         };
         swim::integrate_pitch_keys(&mut player, turn_rate, pitch_integrating, dt);
 

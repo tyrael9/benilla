@@ -46,6 +46,10 @@ renderer runs with no game attached. [`docs/MAP.md`](docs/MAP.md) maps every cra
 and [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md) lists everywhere benilla differs from 1.12.1; both are
 generated from the code.
 
+This fork's controller, mobile and iOS work is tracked separately from upstream changes. See
+[`docs/migration/`](docs/migration/README.md) for the feature inventory, v0.3.0 integration map
+and the current [addon compatibility audit](docs/migration/v0.3.0-addon-compatibility.md).
+
 ## Status
 
 Fully playable on a 1.12.1 server that doesn't enforce Warden or need client changes beyond its

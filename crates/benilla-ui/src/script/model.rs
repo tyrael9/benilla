@@ -1374,11 +1374,13 @@ impl Model {
             vm: super::glue::VmKind::InGame,
             session: 0,
             gamepad: GamepadLuaState::default(),
-            touch_stick_center_x: 0.0,
-            touch_stick_center_y: 0.0,
-            touch_stick_radius: 88.0,
-            touch_stick_travel: 64.0,
-            touch_stick_enabled: true,
+            // Match BenillaMobile's defaults, but remain disabled until that addon explicitly
+            // opts into the movement stick. No invisible touch zone should consume login clicks.
+            touch_stick_center_x: 132.0,
+            touch_stick_center_y: 136.0,
+            touch_stick_radius: 112.0,
+            touch_stick_travel: 63.0,
+            touch_stick_enabled: false,
             touch_stick_unlocked: false,
             addons: Vec::new(),
             addon_index: Vec::new(),

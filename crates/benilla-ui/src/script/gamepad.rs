@@ -194,6 +194,17 @@ mod tests {
     }
 
     #[test]
+    fn touch_stick_is_inert_until_the_mobile_addon_enables_it() {
+        let script = UiScript::new().expect("in-game script");
+        assert_eq!(
+            script.touch_stick_settings(),
+            (132.0, 136.0, 112.0, 63.0, false, false)
+        );
+        let enabled: bool = script.eval("Gamepad_IsTouchStickEnabled()").unwrap();
+        assert!(!enabled);
+    }
+
+    #[test]
     fn mobile_stick_settings_round_trip_and_clamp() {
         let script = UiScript::new().expect("in-game script");
         script

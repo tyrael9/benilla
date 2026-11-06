@@ -159,7 +159,7 @@ fn inject_touch_input(
 
     let lt_owns_pointer = snapshot.current.zl > 0.5;
     let stick = script.as_deref().map_or(
-        (132.0_f32, 136.0_f32, 112.0_f32, 63.0_f32, true, false),
+        (132.0_f32, 136.0_f32, 112.0_f32, 63.0_f32, false, false),
         UiScript::touch_stick_settings,
     );
     let centre = Vec2::new(stick.0, stick.1);

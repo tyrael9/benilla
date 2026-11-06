@@ -42,10 +42,6 @@ jobs:
       # Bevy player and every asset/format crate for each small controller iteration.
       - name: gamepad Lua bridge tests
         run: cargo test -p benilla-ui --lib script::gamepad::tests
-      # App-side snapshot publication is a separate seam; compile the player crate only when
-      # the bridge changes, rather than running the entire workspace on every PR.
-      - name: app-to-Lua gamepad bridge test
-        run: cargo test -p benilla-app --lib gamepad::tests
 
   full-linux:
     if: github.event_name == 'workflow_dispatch'

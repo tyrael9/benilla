@@ -38,10 +38,16 @@ jobs:
         run: scripts/gen-message-catalog.py --check
       - name: pass-span-lint
         run: scripts/pass-span-lint.py
-      # The Gamepad Lua bridge lives in benilla-ui; test that crate instead of compiling the
-      # Bevy player and every asset/format crate for each small controller iteration.
+      # SDL3 is built from source for desktop polling.
+      - name: SDL build dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq pkg-config libasound2-dev libudev-dev
+      # The UI-facing Lua bridge has its own focused tests.
       - name: gamepad Lua bridge tests
         run: cargo test -p benilla-ui --lib script::gamepad::tests
+      # Compile the real Bevy app integration, including SDL3 polling, movement/camera input,
+      # binding dispatch, and (on its own target) the iOS GameController adapter.
+      - name: app gamepad integration check
+        run: cargo check -p benilla-app --no-default-features --lib
 
   full-linux:
     if: github.event_name == 'workflow_dispatch'

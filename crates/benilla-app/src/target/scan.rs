@@ -278,9 +278,7 @@ impl TargetScan<'_, '_> {
                 .as_ref()
                 .is_some_and(|g| g.party_or_raid_member(guid)),
             ScanSide::Interactable => false,
-            ScanSide::Smart => {
-                pair.is_some_and(|(me, unit)| rel.can_attack(&me, &unit))
-            },
+            ScanSide::Smart => pair.is_some_and(|(me, unit)| rel.can_attack(&me, &unit)),
         }
     }
 

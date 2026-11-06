@@ -72,8 +72,15 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     g.set(
         "Gamepad_SetTouchStick",
         lua.create_function(
-            |lua, (center_x, center_y, radius, travel, enabled, unlocked):
-                (f32, f32, f32, f32, bool, bool)| {
+            |lua,
+             (center_x, center_y, radius, travel, enabled, unlocked): (
+                f32,
+                f32,
+                f32,
+                f32,
+                bool,
+                bool,
+            )| {
                 let mut model = lua.app_data_mut::<Model>().expect("model app_data");
                 if center_x.is_finite() {
                     model.touch_stick_center_x = center_x;

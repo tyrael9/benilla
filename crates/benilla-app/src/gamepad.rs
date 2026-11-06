@@ -530,6 +530,7 @@ impl Plugin for GamepadBridgePlugin {
             .add_systems(
                 Update,
                 (gamepad_r3_target_nearest, gamepad_rt_interact)
+                    .chain()
                     .after(poll_platform_gamepad)
                     .before(crate::ui_script::UiInput),
             )

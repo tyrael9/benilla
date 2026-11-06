@@ -3,8 +3,8 @@
 //! SDL is initialized before Bevy starts its window/event loop. The app owns a
 //! normalized snapshot; the Lua bridge only receives a copy of that snapshot.
 
-use bevy::prelude::*;
 use benilla_ui::script::{GamepadLuaState, UiScript};
+use bevy::prelude::*;
 
 #[cfg(not(target_os = "ios"))]
 use sdl3::gamepad::{Axis, Button, Gamepad};

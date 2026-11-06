@@ -179,6 +179,7 @@ mod tests {
         MoveAxes {
             fwd: 0,
             side: 0,
+            analog: bevy::math::Vec2::ZERO,
             mouselook: false,
             turning: false,
             translating: false,

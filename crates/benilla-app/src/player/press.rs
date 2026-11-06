@@ -637,7 +637,15 @@ mod tests {
         world.resource_scope(|world, binds: Mut<BindingsState>| {
             let mut player = world.resource_mut::<Player>();
             input::toggle_autorun(&binds, called, &mut player);
-            input::move_axes(&binds, &mut player, false, true, true);
+            input::move_axes(
+                &binds,
+                &mut player,
+                bevy::math::Vec2::ZERO,
+                player.face_yaw,
+                false,
+                true,
+                true,
+            );
             player.autorun
         })
     }

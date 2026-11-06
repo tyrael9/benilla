@@ -2,6 +2,8 @@
 //! and [`move_axes`], the netted axes with the autorun latch. Netting once keeps the direction,
 //! the speed, the swim amounts and the streamed flags in agreement.
 
+use bevy::math::Vec2;
+
 use super::{camera, state, Player};
 
 /// What [`look_input`] read off the mouse and the bindings, before the look session runs.

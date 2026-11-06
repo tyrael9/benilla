@@ -975,8 +975,16 @@ fn end_dispatch(
     mut latches: ResMut<BindingLatches>,
     gamepad: Res<crate::gamepad::GamepadSnapshot>,
     mut gamepad_bindings: ResMut<crate::gamepad::GamepadBindings>,
+    mut gamepad_vm: Local<crate::ui_script::VmMemo<bool>>,
 ) {
     vm.run(|mut script| {
+        let vm_changed = script
+            .as_deref_mut()
+            .is_some_and(|script| gamepad_vm.claim(script));
+        if vm_changed {
+            gamepad_bindings.latched.clear();
+            gamepad_bindings.modifier_initialized = false;
+        }
         crate::gamepad::dispatch_action_bindings(
             script.as_deref_mut(),
             &gamepad,

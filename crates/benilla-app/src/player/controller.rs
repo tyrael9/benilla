@@ -127,6 +127,7 @@ pub(super) fn sample_look(
         Res<camera_dynamics::CameraOptions>,
         // Only `nearclip` is read here, for the dynamics.
         Res<benilla_world::view::ViewDistance>,
+        Res<crate::gamepad::GamepadSnapshot>,
     ),
     gates: (
         Res<InspectMode>,
@@ -199,8 +200,9 @@ pub(super) fn sample_look(
     }
     let focused = window.focused;
     let word_held = input::word_held(follow_command, &player);
-    let looked = run_look_session(
+    let looked = camera::run_look_session_with_gamepad(
         &pointer.0,
+        pointer.5.look_axis(),
         &mut rig,
         &mut cam,
         &mut player.face_yaw,

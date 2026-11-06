@@ -15,6 +15,23 @@ pub(crate) struct GamepadSnapshot {
     pub(crate) previous: GamepadLuaState,
 }
 
+impl GamepadSnapshot {
+    /// The old controller's radial deadzone: a centered stick is zero, then the remaining
+    /// magnitude is remapped to the full range without changing its direction.
+    pub(crate) fn move_axis(&self) -> Vec2 {
+        apply_deadzone(Vec2::new(self.current.left_x, self.current.left_y), 0.15)
+    }
+}
+
+fn apply_deadzone(value: Vec2, deadzone: f32) -> Vec2 {
+    let magnitude = value.length();
+    if magnitude <= deadzone {
+        return Vec2::ZERO;
+    }
+    let direction = value / magnitude;
+    direction * ((magnitude - deadzone) / (1.0 - deadzone)).clamp(0.0, 1.0)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum GamepadButton {
     A,

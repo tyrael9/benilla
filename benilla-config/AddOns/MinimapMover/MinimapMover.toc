@@ -1,0 +1,7 @@
+## Interface: 11200
+## Title: MinimapMover
+## Notes: Make the Vanilla minimap movable and save its position.
+## Author: zhui / ChatGPT
+## Version: 1.0.0
+## SavedVariables: MinimapMoverDB
+MinimapMover.lua

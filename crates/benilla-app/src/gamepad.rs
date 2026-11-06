@@ -92,10 +92,7 @@ fn touch_stick_claim_allowed(
     centre: Vec2,
     radius: f32,
 ) -> bool {
-    enabled
-        && !unlocked
-        && !gamepad_connected
-        && touch_stick_contains(point, centre, radius)
+    enabled && !unlocked && !gamepad_connected && touch_stick_contains(point, centre, radius)
 }
 
 fn touch_stick_axes(point: Vec2, centre: Vec2, travel: f32) -> Vec2 {

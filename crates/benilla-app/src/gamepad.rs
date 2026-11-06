@@ -84,6 +84,20 @@ fn touch_stick_contains(point: Vec2, centre: Vec2, radius: f32) -> bool {
     point.distance_squared(centre) <= radius * radius
 }
 
+fn touch_stick_claim_allowed(
+    enabled: bool,
+    unlocked: bool,
+    gamepad_connected: bool,
+    point: Vec2,
+    centre: Vec2,
+    radius: f32,
+) -> bool {
+    enabled
+        && !unlocked
+        && !gamepad_connected
+        && touch_stick_contains(point, centre, radius)
+}
+
 fn touch_stick_axes(point: Vec2, centre: Vec2, travel: f32) -> Vec2 {
     ((point - centre) / travel.max(1.0)).clamp_length_max(1.0)
 }
@@ -149,6 +163,12 @@ fn inject_touch_input(
         UiScript::touch_stick_settings,
     );
     let centre = Vec2::new(stick.0, stick.1);
+    if !stick.4 || stick.5 || snapshot.current.connected {
+        // Settings may change while a finger still owns the stick (for example when a hardware
+        // controller connects). Never let the stale touch vector override the physical pad.
+        state.move_id = None;
+        state.move_axis = Vec2::ZERO;
+    }
 
     // Evaluate long presses even on frames with no TouchMoved event.
     if let Some(ui) = state.ui.as_mut() {
@@ -197,7 +217,14 @@ fn inject_touch_input(
             .as_deref()
             .and_then(|s| s.hit_test(ui.x, ui.y))
             .is_some_and(|frame| script.as_deref().is_some_and(|s| !s.is_world_frame(frame)));
-        let in_stick = stick.4 && !stick.5 && touch_stick_contains(ui, centre, stick.2);
+        let in_stick = touch_stick_claim_allowed(
+            stick.4,
+            stick.5,
+            snapshot.current.connected,
+            ui,
+            centre,
+            stick.2,
+        );
         let claim_move = in_stick && !interactive_ui && state.move_id.is_none();
         let can_route_ui = !lt_owns_pointer && state.ui.is_none();
 
@@ -1120,6 +1147,24 @@ mod tests {
             touch_stick_axes(Vec2::new(195.0, 199.0), Vec2::new(132.0, 136.0), 63.0).length(),
             1.0
         );
+    }
+
+    #[test]
+    fn a_hardware_pad_or_unlocked_stick_never_claims_touch_movement() {
+        let centre = Vec2::new(132.0, 136.0);
+        let point = Vec2::new(140.0, 140.0);
+        assert!(touch_stick_claim_allowed(
+            true, false, false, point, centre, 112.0
+        ));
+        assert!(!touch_stick_claim_allowed(
+            false, false, false, point, centre, 112.0
+        ));
+        assert!(!touch_stick_claim_allowed(
+            true, true, false, point, centre, 112.0
+        ));
+        assert!(!touch_stick_claim_allowed(
+            true, false, true, point, centre, 112.0
+        ));
     }
 
     #[test]

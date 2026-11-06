@@ -73,6 +73,19 @@ impl BindingDispatch {
         }
         self.map.get(&chord.fallback()?).map(String::as_str)
     }
+
+    /// Dispatch a key through the same binding resolver after the UI's key-down walk declined it.
+    pub(crate) fn dispatch_key(&self, script: &mut UiScript, key: &str) {
+        let Some(chord) = Chord::parse(key) else {
+            warn!("bindings: invalid key chord '{key}'");
+            return;
+        };
+        if let Some(command) = self.resolve(chord, false) {
+            if let Err(error) = script.execute_binding(command, true) {
+                warn!("bindings: dispatch {key}: {error}");
+            }
+        }
+    }
 }
 
 /// The engine's input state the binding functions drive, the reference's `[InputControl+4]` and
@@ -975,6 +988,7 @@ fn end_dispatch(
     mut latches: ResMut<BindingLatches>,
     gamepad: Res<crate::gamepad::GamepadSnapshot>,
     mut gamepad_bindings: ResMut<crate::gamepad::GamepadBindings>,
+    dispatch: Res<BindingDispatch>,
     mut gamepad_vm: Local<crate::ui_script::VmMemo<bool>>,
 ) {
     vm.run(|mut script| {
@@ -989,6 +1003,11 @@ fn end_dispatch(
             script.as_deref_mut(),
             &gamepad,
             &mut gamepad_bindings,
+        );
+        crate::gamepad::dispatch_utility_bindings(
+            script.as_deref_mut(),
+            &gamepad,
+            &dispatch,
         );
         // ── The stuck-latch sweep ── a release the window never saw: a latch whose base key reads
         // up unlatches now and runs its up-half. The reference's two bulk clears land here too,

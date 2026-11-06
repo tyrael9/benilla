@@ -58,6 +58,7 @@ mod entities;
 mod field_callbacks;
 mod field_watch;
 mod fishing_line;
+mod gamepad;
 mod footprints;
 mod game_plugins;
 mod glue_session;

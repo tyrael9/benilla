@@ -58,6 +58,7 @@ pub(crate) fn stamp_input(
     mut keys: MessageReader<KeyboardInput>,
     mut buttons: MessageReader<MouseButtonInput>,
     mut wheel: MessageReader<MouseWheel>,
+    mut touches: MessageReader<bevy::input::touch::TouchInput>,
     motion: Res<AccumulatedMouseMotion>,
     held: Res<ButtonInput<KeyCode>>,
 ) {
@@ -71,7 +72,10 @@ pub(crate) fn stamp_input(
             .filter(|w| crate::bindings::notch_travel(w.x, w.y, shift) != 0.0)
             .count()
             != 0)
-        | (motion.delta != Vec2::ZERO);
+        | (motion.delta != Vec2::ZERO)
+        // Touch is a first-class player input on iOS: a touch must refresh the idle clock just as
+        // the mouse event it synthesizes does on desktop.
+        | (touches.read().count() != 0);
     if any {
         last.0 = time.elapsed();
     }
@@ -422,7 +426,8 @@ mod tests {
                 .init_resource::<ButtonInput<KeyCode>>()
                 .add_message::<KeyboardInput>()
                 .add_message::<MouseButtonInput>()
-                .add_message::<MouseWheel>();
+                .add_message::<MouseWheel>()
+                .add_message::<bevy::input::touch::TouchInput>();
             app.world_mut()
                 .resource_mut::<Time<Real>>()
                 .advance_by(Duration::from_millis(1234));
@@ -520,6 +525,18 @@ mod tests {
             }),
             touched,
             "and bare mouse movement, with no button held"
+        );
+        assert_eq!(
+            stamped(&|app| {
+                app.world_mut().write_message(bevy::input::touch::TouchInput {
+                    id: 1,
+                    phase: bevy::input::touch::TouchPhase::Started,
+                    position: Vec2::new(100.0, 200.0),
+                    window: Entity::PLACEHOLDER,
+                });
+            }),
+            touched,
+            "a touch also stamps the idle clock on mobile"
         );
 
         // Auto-repeat is category 0xa, whose handler `0x766070` has no store.

@@ -45,6 +45,8 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: test
         run: cargo test --workspace
+      - name: fork addon smoke tests
+        run: python3 scripts/check-fork-addons.py
       - name: doc-links
         run: scripts/doc-links.py
       - name: message-catalog

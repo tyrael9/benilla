@@ -145,7 +145,7 @@ impl UiScript {
     /// transparent, so a large panel cannot reserve the whole stick zone.
     pub fn hit_test_is_interactive(&self, x: f32, y: f32) -> bool {
         let model = self.model_ref();
-        let sorted = order::traversal(&model.arena);
+        let sorted = order::pick_order(&model.arena);
         order::hit_test(&sorted, |fh| {
             let Some(frame) = model.arena.frame(fh) else {
                 return false;

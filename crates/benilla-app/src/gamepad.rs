@@ -193,13 +193,10 @@ fn inject_touch_input(
         let interactive_ui = script
             .as_deref()
             .is_some_and(|s| s.hit_test_is_interactive(ui.x, ui.y));
-        let hit_ui = script.as_deref().and_then(|s| s.hit_test(ui.x, ui.y)).is_some_and(
-            |frame| {
-                script
-                    .as_deref()
-                    .is_some_and(|s| !s.is_world_frame(frame))
-            },
-        );
+        let hit_ui = script
+            .as_deref()
+            .and_then(|s| s.hit_test(ui.x, ui.y))
+            .is_some_and(|frame| script.as_deref().is_some_and(|s| !s.is_world_frame(frame)));
         let in_stick = stick.4 && !stick.5 && touch_stick_contains(ui, centre, stick.2);
         let claim_move = in_stick && !interactive_ui && state.move_id.is_none();
         let can_route_ui = !lt_owns_pointer && state.ui.is_none();

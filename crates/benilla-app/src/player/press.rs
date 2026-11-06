@@ -144,7 +144,16 @@ pub(super) fn press_tick(
     let may_translate = mover.may_translate(player.modes.rooted);
     let may_turn = mover.may_turn(stunned);
     let both_buttons = input::look_input(&binds, &player, &lock).both_buttons;
-    let axes = input::move_axes(&binds, &mut player, both_buttons, may_translate, may_turn);
+    let camera_yaw = player.face_yaw;
+    let axes = input::move_axes(
+        &binds,
+        &mut player,
+        bevy::math::Vec2::ZERO,
+        camera_yaw,
+        both_buttons,
+        may_translate,
+        may_turn,
+    );
     // Translation or a keyboard turn stands a seated body before the start is queued.
     if may_translate && axes.translating || axes.turning {
         posture::stand_up_for_movement(&mut pending, &me, player.move_flags, &net);

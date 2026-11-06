@@ -22,7 +22,10 @@ pub(crate) struct SdlGamepad {
 pub(crate) fn init_platform_gamepad() -> Option<SdlGamepad> {
     let gamepad_index = std::env::args()
         .skip(1)
-        .find_map(|arg| arg.strip_prefix("--gamepad=").and_then(|s| s.parse::<usize>().ok()))
+        .find_map(|arg| {
+            arg.strip_prefix("--gamepad=")
+                .and_then(|s| s.parse::<usize>().ok())
+        })
         .unwrap_or(0);
 
     let sdl = match sdl3::init() {
@@ -76,10 +79,7 @@ impl Plugin for GamepadBridgePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GamepadSnapshot>().add_systems(
             Update,
-            (
-                poll_platform_gamepad,
-                publish_gamepad_snapshot,
-            )
+            (poll_platform_gamepad, publish_gamepad_snapshot)
                 .chain()
                 .before(crate::ui_script::UiTick),
         );
@@ -166,10 +166,16 @@ fn poll_platform_gamepad(mut snapshot: ResMut<GamepadSnapshot>) {
         state.zr = gamepad.rightTrigger().value();
 
         // Apple names these Menu/Options. Keep the old fork's WoW mapping.
-        state.minus = gamepad.buttonOptions().is_some_and(|button| button.isPressed());
+        state.minus = gamepad
+            .buttonOptions()
+            .is_some_and(|button| button.isPressed());
         state.plus = gamepad.buttonMenu().isPressed();
-        state.l3 = gamepad.leftThumbstickButton().is_some_and(|button| button.isPressed());
-        state.r3 = gamepad.rightThumbstickButton().is_some_and(|button| button.isPressed());
+        state.l3 = gamepad
+            .leftThumbstickButton()
+            .is_some_and(|button| button.isPressed());
+        state.r3 = gamepad
+            .rightThumbstickButton()
+            .is_some_and(|button| button.isPressed());
 
         state.dpad_up = dpad.up().isPressed();
         state.dpad_down = dpad.down().isPressed();

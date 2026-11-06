@@ -46,6 +46,10 @@ renderer runs with no game attached. [`docs/MAP.md`](docs/MAP.md) maps every cra
 and [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md) lists everywhere benilla differs from 1.12.1; both are
 generated from the code.
 
+This fork also maintains a documented controller/iOS feature set. Its source inventory and the
+v0.3.0 porting plan live in
+[`docs/migration/v0.3.0-feature-inventory.md`](docs/migration/v0.3.0-feature-inventory.md).
+
 ## Status
 
 Fully playable on a 1.12.1 server that doesn't enforce Warden or need client changes beyond its

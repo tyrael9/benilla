@@ -1004,11 +1004,7 @@ fn end_dispatch(
             &gamepad,
             &mut gamepad_bindings,
         );
-        crate::gamepad::dispatch_utility_bindings(
-            script.as_deref_mut(),
-            &gamepad,
-            &dispatch,
-        );
+        crate::gamepad::dispatch_utility_bindings(script.as_deref_mut(), &gamepad, &dispatch);
         // ── The stuck-latch sweep ── a release the window never saw: a latch whose base key reads
         // up unlatches now and runs its up-half. The reference's two bulk clears land here too,
         // since bevy zeroes `ButtonInput` for both (see `begin_dispatch`). UI keyboard focus never

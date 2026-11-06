@@ -937,6 +937,7 @@ pub(super) fn update_hovered_object(
     rig: Res<CameraControl>,
     pointer_over_ui: Res<PointerOverUi>,
     virtual_mouse: Option<Res<crate::gamepad::GamepadVirtualMouse>>,
+    gamepad_state: Option<Res<crate::gamepad::GamepadSnapshot>>,
     occlusion: Res<PickOcclusion>,
     // The unit pick, earlier in the chain: a unit hover keeps the GameObject halo shut.
     unit_hovered: Res<Hovered>,

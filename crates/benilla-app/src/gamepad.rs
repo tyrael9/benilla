@@ -197,8 +197,7 @@ fn inject_touch_input(
                 },
                 world.window_position,
             ));
-            pending_world_long_press_release =
-                Some((MouseButton::Right, world.window_position));
+            pending_world_long_press_release = Some((MouseButton::Right, world.window_position));
             world.right_down = true;
         }
     }

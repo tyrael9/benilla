@@ -21,6 +21,10 @@ impl GamepadSnapshot {
     pub(crate) fn move_axis(&self) -> Vec2 {
         apply_deadzone(Vec2::new(self.current.left_x, self.current.left_y), 0.15)
     }
+
+    pub(crate) fn look_axis(&self) -> Vec2 {
+        apply_deadzone(Vec2::new(self.current.right_x, self.current.right_y), 0.15)
+    }
 }
 
 fn apply_deadzone(value: Vec2, deadzone: f32) -> Vec2 {

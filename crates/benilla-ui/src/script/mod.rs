@@ -78,6 +78,7 @@ mod duel;
 pub(crate) mod event;
 mod extract;
 mod follow;
+mod gamepad;
 pub(crate) mod font;
 mod font_block;
 mod frame_enum;
@@ -423,7 +424,7 @@ pub use minimap::{
 pub(crate) use model::Model;
 pub use model::{
     FontProbe, MacroIconSource, TextureProbe, TextureSizeFn, TextureSizeProbe, WorldLocFn,
-    WorldLocProjector,
+    WorldLocProjector, GamepadLuaState,
 };
 pub use mouseover::FreelookQuery;
 pub use party::{
@@ -795,6 +796,7 @@ fn install_in_game(lua: &Lua) -> mlua::Result<()> {
     follow::install(lua)?;
     camera_view::install(lua)?;
     input_verbs::install(lua)?;
+    gamepad::install(lua)?;
     session::install(lua)?;
     pvp::install(lua)?;
     worn_display::install(lua)?;
@@ -1103,6 +1105,11 @@ impl UiScript {
     pub fn set_modifiers(&mut self, shift: bool, ctrl: bool, alt: bool) {
         let mut model = self.model_mut();
         model.modifiers = (shift, ctrl, alt);
+    }
+
+    /// Publish the latest platform controller snapshot for FrameXML and addon Lua calls.
+    pub fn set_gamepad_state(&mut self, state: GamepadLuaState) {
+        self.model_mut().gamepad = state;
     }
 
     /// Push the player's WMO-containment state, the indoor byte `0xceaa60` that picks which zoom

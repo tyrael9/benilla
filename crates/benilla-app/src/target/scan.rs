@@ -283,7 +283,7 @@ impl TargetScan<'_, '_> {
                     return false;
                 }
                 pair.is_some_and(|(me, unit)| rel.can_attack(&me, &unit))
-            },
+            }
         }
     }
 

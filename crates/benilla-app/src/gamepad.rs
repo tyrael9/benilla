@@ -13,13 +13,22 @@ use sdl3::gamepad::{Axis, Button, Gamepad};
 pub(crate) struct GamepadSnapshot {
     pub(crate) current: GamepadLuaState,
     pub(crate) previous: GamepadLuaState,
+    pub(crate) touch_look_delta: Vec2,
+    pub(crate) touch_look_active: bool,
+    pub(crate) touch_ui_pointer: Option<Vec2>,
+    pub(crate) touch_world_pointer: Option<Vec2>,
 }
 
 impl GamepadSnapshot {
     /// The old controller's radial deadzone: a centered stick is zero, then the remaining
     /// magnitude is remapped to the full range without changing its direction.
     pub(crate) fn move_axis(&self) -> Vec2 {
-        apply_deadzone(Vec2::new(self.current.left_x, self.current.left_y), 0.15)
+        let stick = if self.current.touch_move_active {
+            Vec2::new(self.current.touch_move_x, self.current.touch_move_y)
+        } else {
+            Vec2::new(self.current.left_x, self.current.left_y)
+        };
+        apply_deadzone(stick, 0.15)
     }
 
     pub(crate) fn look_axis(&self) -> Vec2 {
@@ -32,6 +41,330 @@ impl GamepadSnapshot {
 
     pub(crate) fn virtual_mouse_axis(&self) -> Vec2 {
         apply_deadzone(Vec2::new(self.current.right_x, self.current.right_y), 0.15)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct UiTouchGesture {
+    id: u64,
+    started_at: f32,
+    start_raw: Vec2,
+    start_window: Vec2,
+    last_window: Vec2,
+    left_down: bool,
+    right_down: bool,
+    eligible_click: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct WorldTouchGesture {
+    id: u64,
+    start_raw: Vec2,
+    previous_raw: Vec2,
+    started_at: f32,
+    dragging: bool,
+    right_down: bool,
+    window_position: Vec2,
+}
+
+#[derive(Default)]
+struct TouchGestureState {
+    move_id: Option<u64>,
+    move_axis: Vec2,
+    ui: Option<UiTouchGesture>,
+    world: Option<WorldTouchGesture>,
+    pending_world_release: Option<(bevy::input::mouse::MouseButton, Vec2)>,
+    world_pointer: Option<Vec2>,
+    ui_pointer: Option<Vec2>,
+    clear_world_pointer_next: bool,
+    clear_ui_pointer_next: bool,
+}
+
+fn touch_stick_contains(point: Vec2, centre: Vec2, radius: f32) -> bool {
+    point.distance_squared(centre) <= radius * radius
+}
+
+fn touch_stick_axes(point: Vec2, centre: Vec2, travel: f32) -> Vec2 {
+    ((point - centre) / travel.max(1.0)).clamp_length_max(1.0)
+}
+
+fn touch_look_started_drag(start: Vec2, current: Vec2) -> bool {
+    start.distance_squared(current) >= 64.0
+}
+
+/// Translates touch into the same ordered input records as a mouse. Touch look remains a camera
+/// gesture; only a finger that began on an interactive UI frame enters the UI pointer walk.
+fn inject_touch_input(
+    mut events: MessageReader<bevy::input::touch::TouchInput>,
+    mut records: ResMut<crate::ui_script::InputRecords>,
+    mut snapshot: ResMut<GamepadSnapshot>,
+    mut state: Local<TouchGestureState>,
+    window: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    widescreen: Option<Res<crate::video::Widescreen>>,
+    time: Res<Time>,
+    script: Option<NonSend<UiScript>>,
+) {
+    use bevy::input::ButtonState;
+    use bevy::input::mouse::MouseButton;
+    use bevy::input::touch::TouchPhase;
+    use crate::ui_script::{Record, UiScreen};
+
+    const WORLD_LONG_PRESS_SECS: f32 = 1.0;
+    const UI_LONG_PRESS_SECS: f32 = 3.0;
+
+    let Ok(window) = window.single() else {
+        return;
+    };
+    let screen = UiScreen::of_window(window, widescreen.as_deref());
+    let to_ui = |at: Vec2| crate::ui_script::window_to_ui(screen, at);
+    let mut generated = Vec::new();
+    snapshot.touch_look_delta = Vec2::ZERO;
+    snapshot.touch_look_active = state.world.is_some_and(|gesture| gesture.dragging);
+
+    // Release a world click on the frame after its press so the regular world picker can latch
+    // the touch's press-position ray before the up edge arrives.
+    let clear_world_now = state.clear_world_pointer_next;
+    state.clear_world_pointer_next = false;
+    if let Some((button, at)) = state.pending_world_release.take() {
+        generated.push(pointer_record(
+            Record::Button {
+                button,
+                state: ButtonState::Released,
+            },
+            at,
+        ));
+        state.clear_world_pointer_next = true;
+    } else if clear_world_now && state.world.is_none() {
+        state.world_pointer = None;
+    }
+    let clear_ui_now = state.clear_ui_pointer_next;
+    state.clear_ui_pointer_next = false;
+    if clear_ui_now && state.ui.is_none() {
+        state.ui_pointer = None;
+    }
+
+    let lt_owns_pointer = snapshot.current.zl > 0.5;
+    let mut stick = (132.0_f32, 136.0_f32, 112.0_f32, 63.0_f32, true, false);
+    if let Some(script) = script.as_deref() {
+        stick.0 = script.eval("return Gamepad_GetTouchStickValue('X')").unwrap_or(stick.0);
+        stick.1 = script.eval("return Gamepad_GetTouchStickValue('Y')").unwrap_or(stick.1);
+        stick.2 = script.eval("return Gamepad_GetTouchStickValue('Radius')").unwrap_or(stick.2);
+        stick.3 = script.eval("return Gamepad_GetTouchStickValue('Travel')").unwrap_or(stick.3);
+        stick.4 = script.eval("return Gamepad_IsTouchStickEnabled()").unwrap_or(stick.4);
+        stick.5 = script.eval("return Gamepad_IsTouchStickUnlocked()").unwrap_or(stick.5);
+    }
+    let centre = Vec2::new(stick.0, stick.1);
+
+    // Evaluate long presses even on frames with no TouchMoved event.
+    if let Some(ui) = state.ui.as_mut() {
+        if !ui.left_down
+            && !ui.right_down
+            && ui.eligible_click
+            && time.elapsed_secs() - ui.started_at >= UI_LONG_PRESS_SECS
+        {
+            generated.push(pointer_record(
+                Record::Button {
+                    button: MouseButton::Right,
+                    state: ButtonState::Pressed,
+                },
+                ui.last_window,
+            ));
+            ui.right_down = true;
+        }
+    }
+    if let Some(world) = state.world.as_mut() {
+        if !world.dragging
+            && !world.right_down
+            && time.elapsed_secs() - world.started_at >= WORLD_LONG_PRESS_SECS
+        {
+            generated.push(pointer_record(
+                Record::Button {
+                    button: MouseButton::Right,
+                    state: ButtonState::Pressed,
+                },
+                world.window_position,
+            ));
+            state.pending_world_release = Some((MouseButton::Right, world.window_position));
+            world.right_down = true;
+        }
+    }
+
+    let touch_events: Vec<_> = events.read().map(|touch| (touch.id, touch.phase, touch.position)).collect();
+    for (id, phase, raw) in touch_events {
+        let ui = to_ui(raw);
+        let hit = script.as_deref().and_then(|s| s.hit_test(ui.x, ui.y));
+        let hit_name = script
+            .as_deref()
+            .and_then(|s| s.hit_test_name(ui.x, ui.y));
+        let hit_ui = hit.is_some_and(|frame| {
+            script.as_deref().is_some_and(|s| !s.is_world_frame(frame))
+                && (stick.5 || hit_name.as_deref() != Some("BenillaMobileTouchStick"))
+        });
+        let in_stick = stick.4 && !stick.5 && touch_stick_contains(ui, centre, stick.2);
+        let can_route_ui = !lt_owns_pointer && state.ui.is_none();
+
+        match phase {
+            TouchPhase::Started => {
+                let claim_move = in_stick && !hit_ui && state.move_id.is_none();
+                if claim_move {
+                    state.move_id = Some(id);
+                    state.move_axis = touch_stick_axes(ui, centre, stick.3);
+                } else if can_route_ui && hit_ui {
+                    state.ui = Some(UiTouchGesture {
+                        id,
+                        started_at: time.elapsed_secs(),
+                        start_raw: raw,
+                        start_window: raw,
+                        last_window: raw,
+                        left_down: false,
+                        right_down: false,
+                        eligible_click: true,
+                    });
+                    state.ui_pointer = Some(raw);
+                    generated.push(pointer_record(Record::Move, raw));
+                } else if !lt_owns_pointer && state.world.is_none() {
+                    state.world = Some(WorldTouchGesture {
+                        id,
+                        start_raw: raw,
+                        previous_raw: raw,
+                        started_at: time.elapsed_secs(),
+                        dragging: false,
+                        right_down: false,
+                        window_position: raw,
+                    });
+                    state.world_pointer = Some(raw);
+                }
+            }
+            TouchPhase::Moved if state.move_id == Some(id) => {
+                state.move_axis = touch_stick_axes(ui, centre, stick.3);
+            }
+            TouchPhase::Moved if state.ui.is_some_and(|gesture| gesture.id == id) => {
+                let mut gesture = state.ui.expect("matched UI touch");
+                let crossed = touch_look_started_drag(gesture.start_raw, raw);
+                if crossed && !gesture.left_down && !gesture.right_down {
+                    generated.push(pointer_record(
+                        Record::Button {
+                            button: MouseButton::Left,
+                            state: ButtonState::Pressed,
+                        },
+                        gesture.start_window,
+                    ));
+                    gesture.left_down = true;
+                }
+                gesture.eligible_click &= !crossed;
+                gesture.last_window = raw;
+                state.ui_pointer = Some(raw);
+                generated.push(pointer_record(Record::Move, raw));
+                state.ui = Some(gesture);
+            }
+            TouchPhase::Moved if state.world.is_some_and(|gesture| gesture.id == id) => {
+                let mut gesture = state.world.expect("matched world touch");
+                let was_dragging = gesture.dragging;
+                gesture.dragging |= touch_look_started_drag(gesture.start_raw, raw);
+                if gesture.dragging {
+                    snapshot.touch_look_delta += if was_dragging {
+                        raw - gesture.previous_raw
+                    } else {
+                        raw - gesture.start_raw
+                    };
+                    snapshot.touch_look_active = true;
+                }
+                gesture.previous_raw = raw;
+                gesture.window_position = raw;
+                state.world_pointer = Some(raw);
+                state.world = Some(gesture);
+            }
+            TouchPhase::Ended | TouchPhase::Canceled if state.move_id == Some(id) => {
+                state.move_id = None;
+                state.move_axis = Vec2::ZERO;
+            }
+            TouchPhase::Ended | TouchPhase::Canceled
+                if state.ui.is_some_and(|gesture| gesture.id == id) =>
+            {
+                let gesture = state.ui.take().expect("matched UI touch");
+                state.ui_pointer = Some(raw);
+                generated.push(pointer_record(Record::Move, raw));
+                if gesture.right_down {
+                    generated.push(pointer_record(
+                        Record::Button {
+                            button: MouseButton::Right,
+                            state: ButtonState::Released,
+                        },
+                        raw,
+                    ));
+                } else if gesture.left_down {
+                    generated.push(pointer_record(
+                        Record::Button {
+                            button: MouseButton::Left,
+                            state: ButtonState::Released,
+                        },
+                        raw,
+                    ));
+                } else if phase == TouchPhase::Ended {
+                    let button = if time.elapsed_secs() - gesture.started_at >= UI_LONG_PRESS_SECS {
+                        MouseButton::Right
+                    } else {
+                        MouseButton::Left
+                    };
+                    generated.push(pointer_record(
+                        Record::Button {
+                            button,
+                            state: ButtonState::Pressed,
+                        },
+                        raw,
+                    ));
+                    generated.push(pointer_record(
+                        Record::Button {
+                            button,
+                            state: ButtonState::Released,
+                        },
+                        raw,
+                    ));
+                }
+                state.clear_ui_pointer_next = true;
+            }
+            TouchPhase::Ended | TouchPhase::Canceled
+                if state.world.is_some_and(|gesture| gesture.id == id) =>
+            {
+                let gesture = state.world.take().expect("matched world touch");
+                state.world_pointer = Some(raw);
+                if phase == TouchPhase::Ended && !gesture.dragging && !gesture.right_down {
+                    let button = if time.elapsed_secs() - gesture.started_at >= WORLD_LONG_PRESS_SECS {
+                        MouseButton::Right
+                    } else {
+                        MouseButton::Left
+                    };
+                    generated.push(pointer_record(
+                        Record::Button {
+                            button,
+                            state: ButtonState::Pressed,
+                        },
+                        raw,
+                    ));
+                    state.pending_world_release = Some((button, raw));
+                } else {
+                    state.clear_world_pointer_next = true;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    snapshot.current.touch_move_active = state.move_id.is_some();
+    snapshot.current.touch_move_x = state.move_axis.x;
+    snapshot.current.touch_move_y = state.move_axis.y;
+    snapshot.touch_ui_pointer = state.ui_pointer;
+    snapshot.touch_world_pointer = state.world_pointer;
+    snapshot.touch_look_active |= state.world.is_some_and(|gesture| gesture.dragging);
+
+    let touch_owns_pointer = state.move_id.is_some()
+        || state.ui.is_some()
+        || state.world.is_some()
+        || state.pending_world_release.is_some()
+        || state.world_pointer.is_some();
+    if !generated.is_empty() || touch_owns_pointer {
+        // Keyboard records survive while touch owns the pointer; mouse records cannot race it.
+        records.inject_gamepad_pointer(generated, touch_owns_pointer, false);
     }
 }
 
@@ -529,6 +862,14 @@ impl Plugin for GamepadBridgePlugin {
             )
             .add_systems(
                 Update,
+                inject_touch_input
+                    .after(poll_platform_gamepad)
+                    .after(update_gamepad_virtual_mouse)
+                    .after(crate::ui_script::collect_input_records)
+                    .before(crate::ui_script::UiInputViews),
+            )
+            .add_systems(
+                Update,
                 (gamepad_r3_target_nearest, gamepad_rt_interact)
                     .chain()
                     .after(poll_platform_gamepad)
@@ -763,6 +1104,28 @@ mod tests {
             ),
             Vec2::splat(100.0)
         );
+    }
+
+    #[test]
+    fn touch_stick_axes_are_centered_and_radially_clamped() {
+        assert_eq!(
+            touch_stick_axes(Vec2::new(132.0, 136.0), Vec2::new(132.0, 136.0), 63.0),
+            Vec2::ZERO
+        );
+        assert_eq!(
+            touch_stick_axes(Vec2::new(132.0, 199.0), Vec2::new(132.0, 136.0), 63.0),
+            Vec2::Y
+        );
+        assert_eq!(
+            touch_stick_axes(Vec2::new(195.0, 199.0), Vec2::new(132.0, 136.0), 63.0).length(),
+            1.0
+        );
+    }
+
+    #[test]
+    fn touch_drag_requires_eight_screen_pixels() {
+        assert!(!touch_look_started_drag(Vec2::ZERO, Vec2::new(7.9, 0.0)));
+        assert!(touch_look_started_drag(Vec2::ZERO, Vec2::new(8.0, 0.0)));
     }
 
     #[test]

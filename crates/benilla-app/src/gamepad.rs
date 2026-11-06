@@ -323,11 +323,7 @@ fn poll_platform_gamepad(
     };
     gamepad.subsystem.update();
 
-    if gamepad
-        .gamepad
-        .as_ref()
-        .is_some_and(|pad| !pad.connected())
-    {
+    if gamepad.gamepad.as_ref().is_some_and(|pad| !pad.connected()) {
         info!("gamepad: controller disconnected");
         gamepad.gamepad = None;
     }
@@ -338,7 +334,10 @@ fn poll_platform_gamepad(
                 if let Some(id) = ids.get(gamepad.gamepad_index).copied() {
                     match gamepad.subsystem.open(id) {
                         Ok(pad) => {
-                            info!("gamepad: controller connected at index {}", gamepad.gamepad_index);
+                            info!(
+                                "gamepad: controller connected at index {}",
+                                gamepad.gamepad_index
+                            );
                             gamepad.gamepad = Some(pad);
                         }
                         Err(error) => {

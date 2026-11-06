@@ -4,8 +4,8 @@
 //! GameController (iOS) adapters will write the same normalized snapshot here;
 //! this system copies it into UiScript before the FrameXML tick.
 
-use bevy::prelude::*;
 use benilla_ui::script::{GamepadLuaState, UiScript};
+use bevy::prelude::*;
 
 /// Latest normalized controller state, owned by the app rather than by Lua.
 #[derive(Resource, Clone, Copy, Debug, Default)]
@@ -22,10 +22,7 @@ impl Plugin for GamepadBridgePlugin {
     }
 }
 
-fn publish_gamepad_snapshot(
-    snapshot: Res<GamepadSnapshot>,
-    script: Option<NonSendMut<UiScript>>,
-) {
+fn publish_gamepad_snapshot(snapshot: Res<GamepadSnapshot>, script: Option<NonSendMut<UiScript>>) {
     let Some(mut script) = script else {
         return;
     };

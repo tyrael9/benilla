@@ -240,11 +240,13 @@ fn poll_platform_gamepad(mut snapshot: ResMut<GamepadSnapshot>) {
     use objc2_game_controller::GCController;
 
     let Some(controller) = (unsafe { GCController::current() }) else {
-        snapshot.0 = GamepadLuaState::default();
+        snapshot.previous = snapshot.current;
+        snapshot.current = GamepadLuaState::default();
         return;
     };
     let Some(gamepad) = (unsafe { controller.extendedGamepad() }) else {
-        snapshot.0 = GamepadLuaState::default();
+        snapshot.previous = snapshot.current;
+        snapshot.current = GamepadLuaState::default();
         return;
     };
 
@@ -318,6 +320,25 @@ fn normalize_trigger(value: i16) -> f32 {
 mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
+
+    #[test]
+    fn action_slot_mapping_keeps_the_three_eight_button_layers() {
+        let buttons = [
+            GamepadButton::A,
+            GamepadButton::B,
+            GamepadButton::X,
+            GamepadButton::Y,
+            GamepadButton::DPadUp,
+            GamepadButton::DPadDown,
+            GamepadButton::DPadLeft,
+            GamepadButton::DPadRight,
+        ];
+        for (index, button) in buttons.into_iter().enumerate() {
+            assert_eq!(gamepad_slot(button, 0), format!("GAMEPAD_SLOT_{:02}", index + 1));
+            assert_eq!(gamepad_slot(button, 1), format!("GAMEPAD_SLOT_{:02}", index + 9));
+            assert_eq!(gamepad_slot(button, 2), format!("GAMEPAD_SLOT_{:02}", index + 17));
+        }
+    }
 
     #[test]
     fn app_snapshot_is_published_to_lua() {

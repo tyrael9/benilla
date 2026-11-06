@@ -378,11 +378,12 @@ mod tests {
     fn an_idle_analog_axis_does_not_claim_translation() {
         let binds = BindingsState::default();
         let mut player = Player::default();
+        let camera_yaw = player.face_yaw;
         let axes = move_axes(
             &binds,
             &mut player,
             Vec2::ZERO,
-            player.face_yaw,
+            camera_yaw,
             false,
             true,
             true,

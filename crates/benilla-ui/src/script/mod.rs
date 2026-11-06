@@ -78,10 +78,10 @@ mod duel;
 pub(crate) mod event;
 mod extract;
 mod follow;
-mod gamepad;
 pub(crate) mod font;
 mod font_block;
 mod frame_enum;
+mod gamepad;
 pub mod origin;
 mod roster_read;
 pub use char_name::{check_char_name, NameCharsets, NameLists, NoNameLists, CHAR_NAME_SUCCESS};
@@ -423,8 +423,8 @@ pub use minimap::{
 };
 pub(crate) use model::Model;
 pub use model::{
-    FontProbe, MacroIconSource, TextureProbe, TextureSizeFn, TextureSizeProbe, WorldLocFn,
-    WorldLocProjector, GamepadLuaState,
+    FontProbe, GamepadLuaState, MacroIconSource, TextureProbe, TextureSizeFn, TextureSizeProbe,
+    WorldLocFn, WorldLocProjector,
 };
 pub use mouseover::FreelookQuery;
 pub use party::{

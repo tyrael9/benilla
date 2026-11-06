@@ -148,3 +148,58 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::{GamepadLuaState, UiScript};
+
+    #[test]
+    fn lua_reads_the_latest_platform_controller_snapshot() {
+        let mut script = UiScript::new().expect("in-game script");
+        script.set_gamepad_state(GamepadLuaState {
+            connected: true,
+            a: true,
+            r3: true,
+            dpad_left: true,
+            zl: 0.75,
+            left_x: -0.5,
+            right_y: 0.25,
+            touch_move_x: 0.6,
+            touch_move_active: true,
+            ..Default::default()
+        });
+
+        let connected: bool = script.eval("Gamepad_IsConnected()").unwrap();
+        let a_down: bool = script.eval("Gamepad_IsButtonDown('A')").unwrap();
+        let r3_down: bool = script.eval("Gamepad_IsButtonDown('R3')").unwrap();
+        let dpad_left: bool = script.eval("Gamepad_IsButtonDown('DPadLeft')").unwrap();
+        let zl: f32 = script.eval("Gamepad_GetAxis('ZL')").unwrap();
+        let left_x: f32 = script.eval("Gamepad_GetAxis('LeftX')").unwrap();
+        let right_y: f32 = script.eval("Gamepad_GetAxis('RightY')").unwrap();
+        let touch_x: f32 = script.eval("Gamepad_GetAxis('TouchMoveX')").unwrap();
+        let touch_active: bool = script.eval("Gamepad_IsTouchStickActive()").unwrap();
+
+        assert!(connected && a_down && r3_down && dpad_left && touch_active);
+        assert_eq!(zl, 0.75);
+        assert_eq!(left_x, -0.5);
+        assert_eq!(right_y, 0.25);
+        assert_eq!(touch_x, 0.6);
+    }
+
+    #[test]
+    fn mobile_stick_settings_round_trip_and_clamp() {
+        let script = UiScript::new().expect("in-game script");
+        script
+            .run("Gamepad_SetTouchStick(120, 240, 500, 2, true, true)")
+            .unwrap();
+
+        let (x, y, radius, enabled, unlocked): (f32, f32, f32, bool, bool) =
+            script.eval("Gamepad_GetTouchStick()").unwrap();
+        let travel: f32 = script.eval("Gamepad_GetTouchStickValue('Travel')").unwrap();
+
+        assert_eq!((x, y, radius, travel), (120.0, 240.0, 180.0, 24.0));
+        assert!(enabled && unlocked);
+        let is_touch: bool = script.eval("Gamepad_IsTouchDevice()").unwrap();
+        assert_eq!(is_touch, cfg!(target_os = "ios"));
+    }
+}

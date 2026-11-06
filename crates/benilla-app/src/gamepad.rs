@@ -891,7 +891,9 @@ impl Plugin for GamepadBridgePlugin {
             )
             .add_systems(
                 Update,
-                publish_gamepad_snapshot.before(crate::ui_script::UiTick),
+                publish_gamepad_snapshot
+                    .after(inject_touch_input)
+                    .before(crate::ui_script::UiTick),
             );
     }
 }

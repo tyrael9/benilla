@@ -245,6 +245,41 @@ pub(crate) fn dispatch_action_bindings(
     }
 }
 
+
+/// The one-shot controller commands which already belong to WoW's binding or UI input paths.
+pub(crate) fn dispatch_utility_bindings(
+    script: Option<&mut UiScript>,
+    snapshot: &GamepadSnapshot,
+    dispatch: &crate::bindings::BindingDispatch,
+) {
+    let Some(script) = script else {
+        return;
+    };
+    let now = snapshot.current;
+    let was = snapshot.previous;
+
+    if now.l3 && !was.l3 {
+        if let Err(error) = script.execute_binding("TOGGLEAUTORUN", true) {
+            warn!("gamepad binding TOGGLEAUTORUN: {error}");
+        }
+    }
+    if now.plus && !was.plus {
+        if let Err(error) = script.run("ToggleWorldMap()") {
+            warn!("gamepad ToggleWorldMap(): {error}");
+        }
+    }
+
+    let left_trigger = now.zl > 0.5;
+    if left_trigger && now.x && !was.x {
+        if let Err(error) = script.execute_binding("JUMP", true) {
+            warn!("gamepad binding JUMP: {error}");
+        }
+    }
+    if left_trigger && now.y && !was.y && !script.key_input("ESCAPE") {
+        dispatch.dispatch_key(script, "ESCAPE");
+    }
+}
+
 pub(crate) struct GamepadBridgePlugin;
 
 impl Plugin for GamepadBridgePlugin {
@@ -391,6 +426,31 @@ fn normalize_trigger(value: i16) -> f32 {
 mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
+
+    #[test]
+    fn both_sticks_use_the_radial_deadzone() {
+        let snapshot = GamepadSnapshot {
+            current: GamepadLuaState {
+                left_x: 0.1,
+                right_y: 0.1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(snapshot.move_axis(), Vec2::ZERO);
+        assert_eq!(snapshot.look_axis(), Vec2::ZERO);
+
+        let snapshot = GamepadSnapshot {
+            current: GamepadLuaState {
+                left_y: 1.0,
+                right_x: 1.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(snapshot.move_axis(), Vec2::Y);
+        assert_eq!(snapshot.look_axis(), Vec2::X);
+    }
 
     #[test]
     fn action_slot_mapping_keeps_the_three_eight_button_layers() {

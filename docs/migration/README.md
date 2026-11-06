@@ -4,6 +4,7 @@ The migration is tracked as source documentation plus small, reviewable implemen
 
 - [Feature inventory and porting plan](v0.3.0-feature-inventory.md) — what the old fork adds, how the features work, and the initial reuse/reimplementation decision.
 - [v0.3.0 integration architecture](v0.3.0-integration-architecture.md) — verified current source seams and recommended ownership/scheduling boundaries.
+- [v0.3.0 addon compatibility audit](v0.3.0-addon-compatibility.md) — first port of the three portable addons, API mismatch found and smoke-test coverage.
 
 ## Working rules
 

@@ -1,7 +1,5 @@
-# The gates of scripts/gates.sh that need neither a WoW install nor a display, on Linux, and the
-# workspace tests on Windows, for a pull request from a fork or a dispatch: a red one is seen
-# before anyone builds it. The data-gated tests, the engine boot checks and a live run happen on
-# the maintainer's machine before it lands.
+# Pull requests run fast, targeted checks. The expensive full workspace and platform matrix
+# remains available through workflow_dispatch before a release or a merge that needs it.
 name: CI
 
 on:
@@ -16,17 +14,43 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  gates:
-    # A branch of this repository runs the full chain before it lands; a fork's pull request runs here.
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
+  pr-fast:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: 1
+      CARGO_PROFILE_DEV_DEBUG: 0
+      WOW_DATA: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain
+        run: rustup toolchain install && rustc -V
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: fmt
+        run: cargo fmt --all -- --check
+      - name: doc-links
+        run: scripts/doc-links.py
+      - name: message-catalog
+        run: scripts/gen-message-catalog.py --check
+      - name: pass-span-lint
+        run: scripts/pass-span-lint.py
+      # The Gamepad Lua bridge lives in benilla-ui; test that crate instead of compiling the
+      # Bevy player and every asset/format crate for each small controller iteration.
+      - name: gamepad Lua bridge tests
+        run: cargo test -p benilla-ui --lib script::gamepad::tests
+
+  full-linux:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 150
     env:
       CARGO_TERM_COLOR: always
       CARGO_INCREMENTAL: 0
-      # No debuginfo: it is most of target/, and a runner's disk is small.
       CARGO_PROFILE_DEV_DEBUG: 0
-      # Set and empty: no install, as the gates' test-no-install runs.
       WOW_DATA: ""
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -51,7 +75,6 @@ jobs:
         run: scripts/doc-links.py
       - name: message-catalog
         run: scripts/gen-message-catalog.py --check
-      # reference/ is benilla-re's tables at reference/PIN, byte for byte.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: samwhosung/benilla-re
@@ -66,10 +89,8 @@ jobs:
       - name: player-tests
         run: cargo test -p benilla-formats -p benilla-app --no-default-features --lib
 
-  windows:
-    # The workspace tests on a Windows checkout, which no macOS or Linux gate runs: path separators,
-    # line endings and platform seams fail here first.
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
+  full-windows:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     timeout-minutes: 180
     env:
@@ -84,21 +105,17 @@ jobs:
       - name: Toolchain
         run: rustup toolchain install && rustc -V
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      # Every crate runs, so one binary's crash does not hide the rest of the workspace.
       - name: test
         run: cargo test --workspace --no-fail-fast
-      # A binary that dies whole names no test; on one thread each test's name prints before it runs.
       - name: name the test a crash took down
         if: failure()
         run: cargo test --workspace --no-fail-fast -- --test-threads=1
-      # The player binary links with the main thread's stack its build script asks for: MSVC's own
-      # 1 MB overflows at the login screen. Read from the PE header (PE32+: optional header +72).
       - name: player stack
         if: ${{ !cancelled() }}
         shell: pwsh
         run: |
           cargo build -p benilla --no-default-features
-          $b = [IO.File]::ReadAllBytes("target\debug\benilla.exe")
+          $b = [IO.File]::ReadAllBytes("target\\debug\\benilla.exe")
           $pe = [BitConverter]::ToInt32($b, 0x3c)
           $reserve = [BitConverter]::ToUInt64($b, $pe + 24 + 72)
           "SizeOfStackReserve: $reserve"

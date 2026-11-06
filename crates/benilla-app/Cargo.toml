@@ -22,7 +22,7 @@ bevy_dynamic_linking = ["bevy/dynamic_linking"]
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 # SDL3 provides desktop gamepad input; initialize before winit starts its event loop.
-sdl3 = { version = "0.16.0", features = ["build-from-source"] }
+sdl3 = { version = "0.16.0", features = ["build-from-source", "build-from-source-unix-console"] }
 
 [target.'cfg(target_os = "ios")'.dependencies]
 objc2 = "0.6"

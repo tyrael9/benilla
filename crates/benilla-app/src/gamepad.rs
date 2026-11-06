@@ -17,7 +17,14 @@ pub(crate) struct GamepadSnapshot {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum GamepadButton {
-    A, B, X, Y, DPadUp, DPadDown, DPadLeft, DPadRight,
+    A,
+    B,
+    X,
+    Y,
+    DPadUp,
+    DPadDown,
+    DPadLeft,
+    DPadRight,
 }
 
 #[derive(Resource, Default)]
@@ -87,15 +94,32 @@ pub(crate) fn init_platform_gamepad() -> Option<SdlGamepad> {
     None
 }
 
-
 pub(crate) fn gamepad_slot(button: GamepadButton, modifier: u8) -> &'static str {
     const COMMANDS: [&str; 24] = [
-        "GAMEPAD_SLOT_01", "GAMEPAD_SLOT_02", "GAMEPAD_SLOT_03", "GAMEPAD_SLOT_04",
-        "GAMEPAD_SLOT_05", "GAMEPAD_SLOT_06", "GAMEPAD_SLOT_07", "GAMEPAD_SLOT_08",
-        "GAMEPAD_SLOT_09", "GAMEPAD_SLOT_10", "GAMEPAD_SLOT_11", "GAMEPAD_SLOT_12",
-        "GAMEPAD_SLOT_13", "GAMEPAD_SLOT_14", "GAMEPAD_SLOT_15", "GAMEPAD_SLOT_16",
-        "GAMEPAD_SLOT_17", "GAMEPAD_SLOT_18", "GAMEPAD_SLOT_19", "GAMEPAD_SLOT_20",
-        "GAMEPAD_SLOT_21", "GAMEPAD_SLOT_22", "GAMEPAD_SLOT_23", "GAMEPAD_SLOT_24",
+        "GAMEPAD_SLOT_01",
+ "GAMEPAD_SLOT_02",
+ "GAMEPAD_SLOT_03",
+ "GAMEPAD_SLOT_04",
+        "GAMEPAD_SLOT_05",
+ "GAMEPAD_SLOT_06",
+ "GAMEPAD_SLOT_07",
+ "GAMEPAD_SLOT_08",
+        "GAMEPAD_SLOT_09",
+ "GAMEPAD_SLOT_10",
+ "GAMEPAD_SLOT_11",
+ "GAMEPAD_SLOT_12",
+        "GAMEPAD_SLOT_13",
+ "GAMEPAD_SLOT_14",
+ "GAMEPAD_SLOT_15",
+ "GAMEPAD_SLOT_16",
+        "GAMEPAD_SLOT_17",
+ "GAMEPAD_SLOT_18",
+ "GAMEPAD_SLOT_19",
+ "GAMEPAD_SLOT_20",
+        "GAMEPAD_SLOT_21",
+ "GAMEPAD_SLOT_22",
+ "GAMEPAD_SLOT_23",
+ "GAMEPAD_SLOT_24",
     ];
     let base = match button {
         GamepadButton::A => 0,
@@ -146,13 +170,26 @@ pub(crate) fn dispatch_action_bindings(
         (GamepadButton::DPadLeft, now.dpad_left, was.dpad_left),
         (GamepadButton::DPadRight, now.dpad_right, was.dpad_right),
     ];
-    let modifier = if now.l { 1 } else if now.r { 2 } else { 0 };
+    let modifier = if now.l {
+        1
+    } else if now.r {
+        2
+    } else {
+        0
+    };
 
     for (button, pressed, was_pressed) in buttons {
         let trigger_owned = now.zl > 0.5
-            && matches!(button, GamepadButton::A | GamepadButton::B | GamepadButton::X | GamepadButton::Y);
+            && matches!(
+                button,
+                GamepadButton::A | GamepadButton::B | GamepadButton::X | GamepadButton::Y
+            );
         if trigger_owned {
-            if let Some(index) = bindings.latched.iter().position(|(held, _)| *held == button) {
+            if let Some(index) = bindings
+                .latched
+                .iter()
+                .position(|(held, _)| *held == button)
+            {
                 let (_, command) = bindings.latched.remove(index);
                 if let Err(error) = script.execute_binding(command, false) {
                     warn!("gamepad binding {command} release: {error}");
@@ -186,8 +223,14 @@ impl Plugin for GamepadBridgePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GamepadSnapshot>()
             .init_resource::<GamepadBindings>()
-            .add_systems(Update, poll_platform_gamepad.before(crate::bindings::BindingHead))
-            .add_systems(Update, publish_gamepad_snapshot.before(crate::ui_script::UiTick));
+            .add_systems(
+                Update,
+                poll_platform_gamepad.before(crate::bindings::BindingHead),
+            )
+            .add_systems(
+                Update,
+                publish_gamepad_snapshot.before(crate::ui_script::UiTick),
+            );
     }
 }
 
@@ -334,9 +377,18 @@ mod tests {
             GamepadButton::DPadRight,
         ];
         for (index, button) in buttons.into_iter().enumerate() {
-            assert_eq!(gamepad_slot(button, 0), format!("GAMEPAD_SLOT_{:02}", index + 1));
-            assert_eq!(gamepad_slot(button, 1), format!("GAMEPAD_SLOT_{:02}", index + 9));
-            assert_eq!(gamepad_slot(button, 2), format!("GAMEPAD_SLOT_{:02}", index + 17));
+            assert_eq!(
+                gamepad_slot(button, 0),
+                format!("GAMEPAD_SLOT_{:02}", index + 1)
+            );
+            assert_eq!(
+                gamepad_slot(button, 1),
+                format!("GAMEPAD_SLOT_{:02}", index + 9)
+            );
+            assert_eq!(
+                gamepad_slot(button, 2),
+                format!("GAMEPAD_SLOT_{:02}", index + 17)
+            );
         }
     }
 

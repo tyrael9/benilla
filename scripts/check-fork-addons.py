@@ -16,6 +16,35 @@ def main() -> int:
             "--example", "addon_harness", "--",
             "addons", "--probe", addon,
         ]
+        if addon == "BenillaController":
+            slot_regression = r"""
+                local button = getglobal("BenillaControllerButton3")
+                local invoked = nil
+                UseAction = function(slot) invoked = slot end
+                HasAction = function() return false end
+                GetBonusBarOffset = function() return 0 end
+                UpdateAllSlots()
+                if button.actionSlot ~= 3 then error("normal page display mismatch") end
+                BenillaController_Slot(3)
+                if invoked ~= 3 then error("normal page activation mismatch") end
+                GetBonusBarOffset = function() return 2 end
+                UpdateAllSlots()
+                if button.actionSlot ~= 87 then error("stance page display mismatch") end
+                BenillaController_Slot(3)
+                if invoked ~= 87 then error("stance page activation mismatch") end
+                BenillaController_SetModifier(1)
+                UpdateAllSlots()
+                if button.actionSlot ~= 11 then error("L-layer display mismatch") end
+                BenillaController_Slot(11)
+                if invoked ~= 11 then error("L-layer activation mismatch") end
+                BenillaController_SetModifier(2)
+                UpdateAllSlots()
+                if button.actionSlot ~= 19 then error("R-layer display mismatch") end
+                BenillaController_Slot(19)
+                if invoked ~= 19 then error("R-layer activation mismatch") end
+                return "PASS"
+            """
+            command.extend(["--eval", slot_regression])
         print(f"\n== {addon} ==", flush=True)
         result = subprocess.run(command, check=False, text=True, capture_output=True)
         transcript = result.stdout + result.stderr
@@ -27,6 +56,9 @@ def main() -> int:
             if counter not in transcript:
                 print(f"{addon}: expected {counter!r}; addon is not yet verified", file=sys.stderr)
                 return 1
+        if addon == "BenillaController" and "= PASS" not in transcript:
+            print("BenillaController: stance/action-slot regression probe did not pass", file=sys.stderr)
+            return 1
     print("\nAll fork addons loaded and survived session startup.", flush=True)
     return 0
 

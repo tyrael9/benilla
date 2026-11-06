@@ -20,6 +20,10 @@ trace_chrome = ["bevy/trace_chrome"]
 # only through `cargo run`, which puts the toolchain's libstd on the loader path.
 bevy_dynamic_linking = ["bevy/dynamic_linking"]
 
+[target.'cfg(not(target_os = "ios"))'.dependencies]
+# SDL3 provides desktop gamepad input; initialize before winit starts its event loop.
+sdl3 = { version = "0.16.0", features = ["build-from-source"] }
+
 [dependencies]
 anyhow.workspace = true
 # The EditBox clipboard, on the main thread as NSPasteboard requires; bevy_egui's 3.x.

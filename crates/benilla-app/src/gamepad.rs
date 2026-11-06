@@ -52,7 +52,7 @@ pub(crate) fn init_platform_gamepad() -> Option<SdlGamepad> {
     };
     match subsystem.open(id) {
         Ok(gamepad) => {
-            info!("gamepad: opened controller {}", gamepad.name());
+            info!("gamepad: opened controller at index {gamepad_index}");
             Some(SdlGamepad { _sdl: sdl, gamepad })
         }
         Err(error) => {
@@ -61,6 +61,9 @@ pub(crate) fn init_platform_gamepad() -> Option<SdlGamepad> {
         }
     }
 }
+
+#[cfg(target_os = "ios")]
+pub(crate) struct SdlGamepad;
 
 #[cfg(target_os = "ios")]
 pub(crate) fn init_platform_gamepad() -> Option<SdlGamepad> {
@@ -127,7 +130,53 @@ fn poll_platform_gamepad(
 
 #[cfg(target_os = "ios")]
 fn poll_platform_gamepad(mut snapshot: ResMut<GamepadSnapshot>) {
-    snapshot.0 = GamepadLuaState::default();
+    use objc2_game_controller::GCController;
+
+    let Some(controller) = (unsafe { GCController::current() }) else {
+        snapshot.0 = GamepadLuaState::default();
+        return;
+    };
+    let Some(gamepad) = (unsafe { controller.extendedGamepad() }) else {
+        snapshot.0 = GamepadLuaState::default();
+        return;
+    };
+
+    let mut state = GamepadLuaState {
+        connected: true,
+        ..Default::default()
+    };
+    unsafe {
+        let left = gamepad.leftThumbstick();
+        let right = gamepad.rightThumbstick();
+        let dpad = gamepad.dpad();
+
+        // Match the SDL convention: positive Y is forward/up.
+        state.left_x = left.xAxis().value();
+        state.left_y = left.yAxis().value();
+        state.right_x = right.xAxis().value();
+        state.right_y = -right.yAxis().value();
+
+        state.a = gamepad.buttonA().isPressed();
+        state.b = gamepad.buttonB().isPressed();
+        state.x = gamepad.buttonX().isPressed();
+        state.y = gamepad.buttonY().isPressed();
+        state.l = gamepad.leftShoulder().isPressed();
+        state.r = gamepad.rightShoulder().isPressed();
+        state.zl = gamepad.leftTrigger().value();
+        state.zr = gamepad.rightTrigger().value();
+
+        // Apple names these Menu/Options. Keep the old fork's WoW mapping.
+        state.minus = gamepad.buttonOptions().is_some_and(|button| button.isPressed());
+        state.plus = gamepad.buttonMenu().isPressed();
+        state.l3 = gamepad.leftThumbstickButton().is_some_and(|button| button.isPressed());
+        state.r3 = gamepad.rightThumbstickButton().is_some_and(|button| button.isPressed());
+
+        state.dpad_up = dpad.up().isPressed();
+        state.dpad_down = dpad.down().isPressed();
+        state.dpad_left = dpad.left().isPressed();
+        state.dpad_right = dpad.right().isPressed();
+    }
+    snapshot.0 = state;
 }
 
 fn publish_gamepad_snapshot(

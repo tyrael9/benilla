@@ -26,6 +26,7 @@ pub(crate) struct ScriptSelect<'w, 's> {
     /// The TAB cycler's inputs, for the `TargetNearest*` calls.
     scan: scan::TargetScan<'w, 's>,
     history: ResMut<'w, scan::TabHistory>,
+    interact: ResMut<'w, super::InteractTarget>,
     time: Res<'w, Time>,
     /// The deselects a call's own steps owe, its loot close's (`0x48f369`), run inside it; absent
     /// in a harness without targets.
@@ -110,7 +111,8 @@ impl ScriptSelect<'_, '_> {
         reverse: bool,
     ) -> SelectDebt {
         let now = self.time.elapsed_secs_f64();
-        let (scan, history) = (&self.scan, &mut self.history);
+        let (scan, history, interact) =
+            (&self.scan, &mut self.history, &mut self.interact);
         self.commit.owing(|commit| {
             let owed = scan::cycle(
                 scan::ScanSide::of(mode),
@@ -119,6 +121,7 @@ impl ScriptSelect<'_, '_> {
                 scan,
                 history,
                 &mut commit.selection,
+                &mut *interact,
                 &mut commit.seam,
                 &mut commit.front,
             );

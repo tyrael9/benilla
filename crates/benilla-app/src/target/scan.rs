@@ -50,23 +50,23 @@ fn tab_trace_on() -> bool {
     *ON.get_or_init(|| std::env::var_os("WOW_TAB_TRACE").is_some())
 }
 
-/// The reference's scan mode: the `TargetNearest*` shims (`0x489a80` enemy 1, `0x489aa0` friend 2,
-/// `0x489ac0`/`0x489ae0` party and raid 3/4) all call one cycler, `0x493f60(reverse, mode)`, and
-/// the mode reaches only the per-candidate filter `0x493e40`.
+/// The reference's four stock scans plus the controller's two non-stock modes. Every mode uses
+/// the same screen/distance ordering; the Interactable/Smart filters additionally admit world
+/// objects and corpses into the candidate pool.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ScanSide {
-    /// Mode 1 (`0x493e73`): alive by the reads-dead triple `0x605f90`, and `CanAttack 0x606980`.
+    /// Alive units we can attack.
     Enemy,
-    /// Mode 2 (`0x493eca`): `CanAssist 0x6066f0`, friendly or better (`0x60671e`), whose
-    /// `IsPvP 0x605ff0` leg refuses a creature without `UNIT_FLAG_PVP`; then health > 0 with no
-    /// dynflag leg, so a feigning ally counts.
+    /// Living units we can assist.
     Friend,
-    /// Mode 3 (`0x493eed`): not us, then `0x4e7f70`, a member of our party slots. No health, dead
-    /// or reaction leg.
+    /// Party members.
     Party,
-    /// Mode 4 (`0x493f15`): not us, then `0x4918e0`, party (`0x4e7f70`) or raid roster
-    /// (`0x4baee0`).
+    /// Party or raid members.
     Raid,
+    /// NPC services, lootable units/corpses, and usable GameObjects.
+    Interactable,
+    /// Hostiles plus interactables; the controller chooses this outside combat.
+    Smart,
 }
 
 impl ScanSide {
@@ -78,6 +78,8 @@ impl ScanSide {
             NearestMode::Friend => Self::Friend,
             NearestMode::PartyMember => Self::Party,
             NearestMode::RaidMember => Self::Raid,
+            NearestMode::Interactable => Self::Interactable,
+            NearestMode::Smart => Self::Smart,
         }
     }
 }
@@ -87,6 +89,7 @@ impl ScanSide {
 struct Candidate {
     entity: Entity,
     guid: u64,
+    kind: EntityKind,
     on_screen: bool,
     score: f32,
 }
@@ -238,6 +241,8 @@ pub(crate) struct TargetScan<'w, 's> {
     group: Option<Res<'w, crate::ui_party::GroupState>>,
     /// `targetNearestDistance`, the default's in those harnesses.
     tab_range: Option<Res<'w, super::TabRange>>,
+    /// GameObject faction/template and meeting-stone inputs; optional for UI-only scan harnesses.
+    go_gate: Option<super::hover::GoGateInputs<'w>>,
 }
 
 impl TargetScan<'_, '_> {
@@ -269,6 +274,51 @@ impl TargetScan<'_, '_> {
                 .group
                 .as_ref()
                 .is_some_and(|g| g.party_or_raid_member(guid)),
+            ScanSide::Interactable | ScanSide::Smart => false,
+        }
+    }
+
+    /// Whether an object currently admits an interaction through the client's normal gates.
+    fn is_interactable(&self, kind: EntityKind, guid: u64, store: Option<&ObjectStore>) -> bool {
+        let Some(store) = store else {
+            return false;
+        };
+
+        match kind {
+            EntityKind::Unit | EntityKind::Player => {
+                if store.0.unit_is_dead() {
+                    return store.0.unit_lootable();
+                }
+                self.pair(guid, Some(store)).is_some_and(|(me, unit)| {
+                    self.relations.get().can_interact(&me, &unit)
+                })
+            }
+            EntityKind::Corpse => {
+                !store.0.corpse_is_bones() || store.0.corpse_lootable()
+            }
+            EntityKind::GameObject => {
+                let Some(gate) = self.go_gate.as_ref() else {
+                    return false;
+                };
+                let reaction = super::cursor_mode::go_reaction(
+                    gate.factions.as_deref(),
+                    store.0.gameobject_faction(),
+                    self.self_store(),
+                );
+                let template = gate.templates.get(guid);
+                let overrides = super::cursor_mode::GoOverrides {
+                    channel_owned: super::cursor_mode::fishing_channel_owned(
+                        self.self_store(),
+                        Some(guid),
+                    ),
+                    meeting_stone_queued: super::cursor_mode::meeting_stone_queued(
+                        template.and_then(|t| t.meeting_stone).map(|m| m.area),
+                        gate.queued_area(),
+                    ),
+                };
+                super::cursor_mode::go_highlightable(store, reaction, overrides)
+            }
+            _ => false,
         }
     }
 
@@ -347,10 +397,28 @@ impl TargetScan<'_, '_> {
         };
         let mut out = Vec::new();
         for (entity, net, guid_c, tf, store) in &self.units {
-            if !matches!(net.kind, EntityKind::Unit | EntityKind::Player) {
+            let is_unit = matches!(net.kind, EntityKind::Unit | EntityKind::Player);
+            if !matches!(
+                net.kind,
+                EntityKind::Unit | EntityKind::Player | EntityKind::GameObject | EntityKind::Corpse
+            ) {
                 continue;
             }
-            if !self.is_valid(side, guid_c.0, store) {
+            let valid = match side {
+                ScanSide::Enemy | ScanSide::Friend | ScanSide::Party | ScanSide::Raid => {
+                    is_unit && self.is_valid(side, guid_c.0, store)
+                }
+                ScanSide::Interactable => self.is_interactable(net.kind, guid_c.0, store),
+                ScanSide::Smart => {
+                    if is_unit {
+                        self.is_valid(ScanSide::Enemy, guid_c.0, store)
+                            || self.is_interactable(net.kind, guid_c.0, store)
+                    } else {
+                        self.is_interactable(net.kind, guid_c.0, store)
+                    }
+                }
+            };
+            if !valid {
                 trace_unit(
                     guid_c.0,
                     tf,
@@ -359,6 +427,8 @@ impl TargetScan<'_, '_> {
                         ScanSide::Friend => "REJECT dead-or-unassistable",
                         ScanSide::Party => "REJECT not-in-party",
                         ScanSide::Raid => "REJECT not-in-party-or-raid",
+                        ScanSide::Interactable => "REJECT not-interactable",
+                        ScanSide::Smart => "REJECT not-smart-target",
                     },
                 );
                 continue;
@@ -406,6 +476,7 @@ impl TargetScan<'_, '_> {
             out.push(Candidate {
                 entity,
                 guid: guid_c.0,
+                kind: net.kind,
                 on_screen: off_center.is_some(),
                 score,
             });
@@ -826,6 +897,7 @@ pub(super) fn cycle(
     scan: &TargetScan,
     history: &mut TabHistory,
     selection: &mut Selection,
+    interact: &mut super::InteractTarget,
     seam: &mut crate::creature_anim::AttackSeam,
     front: &mut super::front::SelectFront,
 ) -> Owed {
@@ -861,16 +933,17 @@ pub(super) fn cycle(
     }
     // Reverse walks the history back; an empty walk falls through to the forward pick.
     let visited = history.guids();
+    let current_guid = selection.guid.or(interact.guid);
     let back = reverse
         .then(|| pick_back(&visited, &pool, selection.guid))
         .flatten();
-    let (entity, guid, wrapped) = match back {
-        Some(i) => (pool[i].entity, pool[i].guid, false),
+    let (entity, guid, kind, wrapped) = match back {
+        Some(i) => (pool[i].entity, pool[i].guid, pool[i].kind, false),
         None => {
-            let Some((i, wrapped)) = pick_forward(&pool, &visited, selection.guid) else {
+            let Some((i, wrapped)) = pick_forward(&pool, &visited, current_guid) else {
                 return Owed::default();
             };
-            (pool[i].entity, pool[i].guid, wrapped)
+            (pool[i].entity, pool[i].guid, pool[i].kind, wrapped)
         }
     };
     // `0x4941e6`: the pick goes to `SelectTarget`, whose front may bind it to the cursor's cast
@@ -887,28 +960,50 @@ pub(super) fn cycle(
     if wrapped {
         history.visited.clear();
     }
-    // The outgoing selection joins the history (`TargetPriorityContinueFromManualTarget`).
-    if let Some(old) = selection.guid {
+    // The outgoing normal or interaction target joins the history.
+    if let Some(old) = current_guid {
         history.push(old, now);
     }
-    let old_latches = latches_on(&scan.relations, selection.guid);
-    let (out, owed) = commit_owing(
-        selection,
-        seam,
-        Some(entity),
-        guid,
-        scan.store_at(entity),
-        // `IsSelectable`'s `CREATEDBY` clause reads it.
-        scan.self_guid(),
-        // `Attack 0x5ecb70`'s validation, which a mode-2 pick fails (reaction >= 4 against
-        // `CanAttack`'s < 4). A duelling friendly passes `CanAttack`'s duel arm, which reads no
-        // reaction, so the reference's `Attack` would re-swing at it; here it gets none.
-        side == ScanSide::Enemy,
-        old_latches,
-    );
-    if out.changed {
+
+    let (selection_changed, owed) = if matches!(kind, EntityKind::Unit | EntityKind::Player) {
+        // Units use the normal WoW selection slot; leave no stale interaction target behind.
+        interact.target = None;
+        interact.guid = None;
+        let old_latches = latches_on(&scan.relations, selection.guid);
+        let (out, owed) = commit_owing(
+            selection,
+            seam,
+            Some(entity),
+            guid,
+            scan.store_at(entity),
+            scan.self_guid(),
+            // The standalone Smart scan finds hostiles but does not start an automatic attack.
+            side == ScanSide::Enemy,
+            old_latches,
+        );
+        if out.changed {
+            history.push(guid, now);
+        }
+        (out.changed, owed)
+    } else {
+        // Corpses and GameObjects live in the non-selectable interaction slot, not Selection.
+        let send = if selection.guid.is_some() {
+            super::click::deselect_owing(selection, seam)
+        } else {
+            None
+        };
+        interact.target = Some(entity);
+        interact.guid = Some(guid);
         history.push(guid, now);
-    }
+        (
+            true,
+            Owed {
+                send,
+                ..Owed::default()
+            },
+        )
+    };
+
     if trace {
         info!(
             "tab-trace: pick {guid:#x} \"{}\"{} — {}",
@@ -916,7 +1011,7 @@ pub(super) fn cycle(
                 .resolve_unit(guid, None, Ask::Read)
                 .unwrap_or("?"),
             if wrapped { " (wrapped)" } else { "" },
-            if out.changed {
+            if selection_changed {
                 "selection changed"
             } else {
                 "NO-OP (already the selection)"
@@ -934,6 +1029,7 @@ pub(crate) struct AttackPick<'w, 's> {
     scan: TargetScan<'w, 's>,
     history: ResMut<'w, TabHistory>,
     time: Res<'w, Time>,
+    interact: ResMut<'w, super::InteractTarget>,
     /// The `SelectTarget` returns ahead of the validator's two selecting calls.
     front: super::front::SelectFront<'w, 's>,
 }
@@ -976,6 +1072,7 @@ impl AttackPick<'_, '_> {
                 &self.scan,
                 &mut self.history,
                 selection,
+                &mut self.interact,
                 seam,
                 &mut self.front,
             );
@@ -1743,6 +1840,7 @@ mod tests {
         Candidate {
             entity: Entity::PLACEHOLDER,
             guid,
+            kind: EntityKind::Unit,
             on_screen,
             score,
         }

@@ -3,7 +3,7 @@
 //! SDL is initialized before Bevy starts its window/event loop. The app owns a
 //! normalized snapshot; the Lua bridge only receives a copy of that snapshot.
 
-use benilla_ui::script::{GamepadLuaState, UiScript};
+use benilla_ui::script::{GamepadLuaState, NearestMode, UiScript};
 use bevy::prelude::*;
 
 #[cfg(not(target_os = "ios"))]
@@ -302,6 +302,60 @@ pub(crate) fn dispatch_utility_bindings(
     }
 }
 
+fn r3_target_mode(state: GamepadLuaState, in_combat: bool) -> NearestMode {
+    if state.l {
+        // LB + R3 → friendly.
+        NearestMode::Friend
+    } else if state.r {
+        // RB + R3 → interactable.
+        NearestMode::Interactable
+    } else if in_combat {
+        // R3 in combat → hostile.
+        NearestMode::Enemy
+    } else {
+        // R3 out of combat → Smart.
+        NearestMode::Smart
+    }
+}
+
+/// R3 is edge-triggered and shares the same host and call stream as keyboard target cycles.
+fn gamepad_r3_target_nearest(
+    snapshot: Res<GamepadSnapshot>,
+    self_q: Query<&crate::net::ObjectStore, With<crate::net::SelfPlayer>>,
+    mut vm: crate::script_calls::VmWith<()>,
+) {
+    let state = snapshot.current;
+    if !state.r3 || snapshot.previous.r3 {
+        return;
+    }
+    let Ok(store) = self_q.single() else {
+        return;
+    };
+    let in_combat = store.0.unit_flags() & (1 << 19) != 0;
+    let mode = r3_target_mode(state, in_combat);
+    vm.run(|script| {
+        if let Some(script) = script {
+            if let Err(error) = script.target_nearest(mode, false) {
+                warn!("gamepad R3 target cycle: {error}");
+            }
+        }
+    });
+}
+
+/// RT interacts with the non-selectable target first, then the normal WoW selection.
+fn gamepad_rt_interact(
+    snapshot: Res<GamepadSnapshot>,
+    selection: Res<crate::target::Selection>,
+    interact: Res<crate::target::InteractTarget>,
+    mut interacts: MessageWriter<crate::target::Interact>,
+) {
+    if snapshot.current.zr > 0.5 && snapshot.previous.zr <= 0.5 {
+        if let Some(target) = interact.target.or(selection.target) {
+            interacts.write(crate::target::Interact(target));
+        }
+    }
+}
+
 pub(crate) struct GamepadBridgePlugin;
 
 impl Plugin for GamepadBridgePlugin {
@@ -311,6 +365,12 @@ impl Plugin for GamepadBridgePlugin {
             .add_systems(
                 Update,
                 poll_platform_gamepad.before(crate::bindings::BindingHead),
+            )
+            .add_systems(
+                Update,
+                (gamepad_r3_target_nearest, gamepad_rt_interact)
+                    .after(poll_platform_gamepad)
+                    .before(crate::ui_script::UiInput),
             )
             .add_systems(
                 Update,
@@ -504,6 +564,22 @@ mod tests {
         };
         assert_eq!(snapshot.move_axis(), Vec2::Y);
         assert_eq!(snapshot.look_axis(), Vec2::X);
+    }
+
+    #[test]
+    fn r3_selects_the_expected_target_mode() {
+        let base = GamepadLuaState::default();
+        assert_eq!(r3_target_mode(base, true), NearestMode::Enemy);
+        assert_eq!(r3_target_mode(base, false), NearestMode::Smart);
+        assert_eq!(
+            r3_target_mode(GamepadLuaState { l: true, r: true, ..base }, true),
+            NearestMode::Friend,
+            "LB takes priority when both shoulder modifiers are held"
+        );
+        assert_eq!(
+            r3_target_mode(GamepadLuaState { r: true, ..base }, false),
+            NearestMode::Interactable
+        );
     }
 
     #[test]

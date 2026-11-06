@@ -129,6 +129,14 @@ pub(crate) struct Selection {
     pub(crate) last: Option<u64>,
 }
 
+/// The controller's non-selectable interaction target. Corpses and GameObjects occupy the client's
+/// interact slot, never the normal Selection slot.
+#[derive(Resource, Default, Clone, Copy, Debug, PartialEq)]
+pub(crate) struct InteractTarget {
+    pub(crate) target: Option<Entity>,
+    pub(crate) guid: Option<u64>,
+}
+
 /// This frame's character-model pick, by [`hover::update_hover`]. At most one slot is set: the
 /// reference makes one pick over all CGObjects and switches on type at the end (`0x480df0` →
 /// `0x7089c0`), and a corpse (`CGCorpse_C`) is not a unit, so it never answers as `target`.
@@ -317,6 +325,7 @@ impl Plugin for TargetPlugin {
         crate::field_callbacks::register(app);
         release::register(app);
         app.init_resource::<Selection>()
+            .init_resource::<InteractTarget>()
             .init_resource::<ClickConfig>()
             .init_resource::<AssistAttack>()
             .init_resource::<Hovered>()

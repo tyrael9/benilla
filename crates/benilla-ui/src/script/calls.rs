@@ -491,8 +491,8 @@ pub(crate) fn ask(lua: &Lua, ask: RecordAsk) -> mlua::Result<()> {
     submit(lua, ScriptCall::RecordAsk(ask))
 }
 
-/// The mode the four `TargetNearest*` shims hand the TAB cycler `0x493f60`, the only byte that
-/// differs between them; it reaches only the per-candidate filter `0x493e40`.
+/// The mode the `TargetNearest*` shims hand the TAB cycler `0x493f60`. The four stock modes
+/// are joined by the controller's Interactable and Smart scans.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NearestMode {
     /// Mode 1, `TargetNearestEnemy`.
@@ -503,6 +503,10 @@ pub enum NearestMode {
     PartyMember,
     /// Mode 4, `TargetNearestRaidMember`: a party or raid member other than us.
     RaidMember,
+    /// Controller scan: units with services, lootable units/corpses, and usable GameObjects.
+    Interactable,
+    /// Controller scan: enemies in combat, otherwise interactable units and world objects.
+    Smart,
 }
 
 impl ScriptCall {

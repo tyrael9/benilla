@@ -1112,6 +1112,19 @@ impl UiScript {
         self.model_mut().gamepad = state;
     }
 
+    /// Run one nearest-target cycle from an engine-owned input such as the controller's R3 press.
+    /// The caller must lend the script-call host (for example through `VmWith::run`).
+    pub fn target_nearest(&self, mode: NearestMode, reverse: bool) -> mlua::Result<()> {
+        calls::submit(
+            &self.lua,
+            ScriptCall::TargetNearest {
+                mode,
+                reverse,
+                may_cast: true,
+            },
+        )
+    }
+
     /// Push the player's WMO-containment state, the indoor byte `0xceaa60` that picks which zoom
     /// index `GetZoom`/`SetZoom` act on. Call it before the script tick, on each inside/outside
     /// edge and for each new VM.

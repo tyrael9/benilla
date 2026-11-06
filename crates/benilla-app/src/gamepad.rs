@@ -10,7 +10,21 @@ use bevy::prelude::*;
 use sdl3::gamepad::{Axis, Button, Gamepad};
 
 #[derive(Resource, Clone, Copy, Debug, Default)]
-pub(crate) struct GamepadSnapshot(pub(crate) GamepadLuaState);
+pub(crate) struct GamepadSnapshot {
+    pub(crate) current: GamepadLuaState,
+    pub(crate) previous: GamepadLuaState,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum GamepadButton {
+    A, B, X, Y, DPadUp, DPadDown, DPadLeft, DPadRight,
+}
+
+#[derive(Resource, Default)]
+pub(crate) struct GamepadBindings {
+    /// The action command selected on press; modifier changes must not alter its release.
+    latched: Vec<(GamepadButton, &'static str)>,
+}
 
 #[cfg(not(target_os = "ios"))]
 pub(crate) struct SdlGamepad {
@@ -73,16 +87,107 @@ pub(crate) fn init_platform_gamepad() -> Option<SdlGamepad> {
     None
 }
 
+
+pub(crate) fn gamepad_slot(button: GamepadButton, modifier: u8) -> &'static str {
+    const COMMANDS: [&str; 24] = [
+        "GAMEPAD_SLOT_01", "GAMEPAD_SLOT_02", "GAMEPAD_SLOT_03", "GAMEPAD_SLOT_04",
+        "GAMEPAD_SLOT_05", "GAMEPAD_SLOT_06", "GAMEPAD_SLOT_07", "GAMEPAD_SLOT_08",
+        "GAMEPAD_SLOT_09", "GAMEPAD_SLOT_10", "GAMEPAD_SLOT_11", "GAMEPAD_SLOT_12",
+        "GAMEPAD_SLOT_13", "GAMEPAD_SLOT_14", "GAMEPAD_SLOT_15", "GAMEPAD_SLOT_16",
+        "GAMEPAD_SLOT_17", "GAMEPAD_SLOT_18", "GAMEPAD_SLOT_19", "GAMEPAD_SLOT_20",
+        "GAMEPAD_SLOT_21", "GAMEPAD_SLOT_22", "GAMEPAD_SLOT_23", "GAMEPAD_SLOT_24",
+    ];
+    let base = match button {
+        GamepadButton::A => 0,
+        GamepadButton::B => 1,
+        GamepadButton::X => 2,
+        GamepadButton::Y => 3,
+        GamepadButton::DPadUp => 4,
+        GamepadButton::DPadDown => 5,
+        GamepadButton::DPadLeft => 6,
+        GamepadButton::DPadRight => 7,
+    };
+    COMMANDS[base + modifier.min(2) as usize * 8]
+}
+
+/// Runs the controller action-bar commands inside the normal binding pass. This keeps
+/// BindingInput calls in the same frame and captures the L/R layer at button-down time.
+pub(crate) fn dispatch_action_bindings(
+    script: Option<&mut UiScript>,
+    snapshot: &GamepadSnapshot,
+    bindings: &mut GamepadBindings,
+) {
+    let Some(script) = script else {
+        return;
+    };
+    let now = snapshot.current;
+    let was = snapshot.previous;
+
+    if now.l != was.l || now.r != was.r {
+        let command = if now.l {
+            "GAMEPAD_MODIFIER_L"
+        } else if now.r {
+            "GAMEPAD_MODIFIER_R"
+        } else {
+            "GAMEPAD_MODIFIER_CLEAR"
+        };
+        if let Err(error) = script.execute_binding(command, true) {
+            warn!("gamepad binding {command}: {error}");
+        }
+    }
+
+    let buttons = [
+        (GamepadButton::A, now.a, was.a),
+        (GamepadButton::B, now.b, was.b),
+        (GamepadButton::X, now.x, was.x),
+        (GamepadButton::Y, now.y, was.y),
+        (GamepadButton::DPadUp, now.dpad_up, was.dpad_up),
+        (GamepadButton::DPadDown, now.dpad_down, was.dpad_down),
+        (GamepadButton::DPadLeft, now.dpad_left, was.dpad_left),
+        (GamepadButton::DPadRight, now.dpad_right, was.dpad_right),
+    ];
+    let modifier = if now.l { 1 } else if now.r { 2 } else { 0 };
+
+    for (button, pressed, was_pressed) in buttons {
+        let trigger_owned = now.zl > 0.5
+            && matches!(button, GamepadButton::A | GamepadButton::B | GamepadButton::X | GamepadButton::Y);
+        if trigger_owned {
+            if let Some(index) = bindings.latched.iter().position(|(held, _)| *held == button) {
+                let (_, command) = bindings.latched.remove(index);
+                if let Err(error) = script.execute_binding(command, false) {
+                    warn!("gamepad binding {command} release: {error}");
+                }
+            }
+            continue;
+        }
+
+        if pressed && !was_pressed {
+            let command = gamepad_slot(button, modifier);
+            if !bindings.latched.iter().any(|(held, _)| *held == button) {
+                if let Err(error) = script.execute_binding(command, true) {
+                    warn!("gamepad binding {command}: {error}");
+                }
+                bindings.latched.push((button, command));
+            }
+        } else if !pressed && was_pressed {
+            if let Some(index) = bindings.latched.iter().position(|(held, _)| *held == button) {
+                let (_, command) = bindings.latched.remove(index);
+                if let Err(error) = script.execute_binding(command, false) {
+                    warn!("gamepad binding {command} release: {error}");
+                }
+            }
+        }
+    }
+}
+
 pub(crate) struct GamepadBridgePlugin;
 
 impl Plugin for GamepadBridgePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<GamepadSnapshot>().add_systems(
-            Update,
-            (poll_platform_gamepad, publish_gamepad_snapshot)
-                .chain()
-                .before(crate::ui_script::UiTick),
-        );
+        app.init_resource::<GamepadSnapshot>()
+            .init_resource::<GamepadBindings>()
+            .add_systems(Update, poll_platform_gamepad.before(crate::bindings::BindingHead))
+            .add_systems(Update, publish_gamepad_snapshot.before(crate::ui_script::UiTick));
     }
 }
 
@@ -92,7 +197,8 @@ fn poll_platform_gamepad(
     mut snapshot: ResMut<GamepadSnapshot>,
 ) {
     let Some(gamepad) = gamepad else {
-        snapshot.0 = GamepadLuaState::default();
+        snapshot.previous = snapshot.current;
+        snapshot.current = GamepadLuaState::default();
         return;
     };
     gamepad.gamepad.subsystem().update();
@@ -102,7 +208,8 @@ fn poll_platform_gamepad(
     let right_x = normalize_axis(pad.axis(Axis::RightX));
     let right_y = normalize_axis(pad.axis(Axis::RightY));
 
-    snapshot.0 = GamepadLuaState {
+    snapshot.previous = snapshot.current;
+    snapshot.current = GamepadLuaState {
         connected: true,
         a: pad.button(Button::South),
         b: pad.button(Button::East),
@@ -182,14 +289,15 @@ fn poll_platform_gamepad(mut snapshot: ResMut<GamepadSnapshot>) {
         state.dpad_left = dpad.left().isPressed();
         state.dpad_right = dpad.right().isPressed();
     }
-    snapshot.0 = state;
+    snapshot.previous = snapshot.current;
+    snapshot.current = state;
 }
 
 fn publish_gamepad_snapshot(snapshot: Res<GamepadSnapshot>, script: Option<NonSendMut<UiScript>>) {
     let Some(mut script) = script else {
         return;
     };
-    script.set_gamepad_state(snapshot.0);
+    script.set_gamepad_state(snapshot.current);
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -215,12 +323,12 @@ mod tests {
     fn app_snapshot_is_published_to_lua() {
         let mut app = App::new();
         app.insert_non_send_resource(UiScript::new().expect("in-game script"));
-        app.insert_resource(GamepadSnapshot(GamepadLuaState {
+        app.insert_resource(GamepadSnapshot { current: GamepadLuaState {
             connected: true,
             a: true,
             left_x: 0.75,
             ..Default::default()
-        }));
+        }, ..Default::default() });
 
         app.world_mut()
             .run_system_once(publish_gamepad_snapshot)

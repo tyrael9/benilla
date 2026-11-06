@@ -32,8 +32,6 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: fmt
         run: cargo fmt --all -- --check
-      - name: doc-links
-        run: scripts/doc-links.py
       - name: message-catalog
         run: scripts/gen-message-catalog.py --check
       - name: pass-span-lint

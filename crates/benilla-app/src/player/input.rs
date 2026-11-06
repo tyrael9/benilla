@@ -339,8 +339,57 @@ mod tests {
         let binds = BindingsState::after_calls(earlier, now);
         let autorun_on = toggle_autorun(&binds, None, player);
         let both = both_engaged(&binds);
-        move_axes(&binds, player, binds.steering(), !rooted, true);
+        let camera_yaw = player.face_yaw;
+        move_axes(
+            &binds,
+            player,
+            Vec2::ZERO,
+            camera_yaw,
+            binds.steering(),
+            !rooted,
+            true,
+        );
         cancels_cast(&binds, autorun_on, both, true)
+    }
+
+    #[test]
+    fn analog_movement_uses_camera_facing_and_preserves_stick_magnitude() {
+        let binds = BindingsState::default();
+        let mut player = Player::default();
+        let camera_yaw = 1.25;
+        let axes = move_axes(
+            &binds,
+            &mut player,
+            Vec2::new(0.6, 0.8),
+            camera_yaw,
+            false,
+            true,
+            true,
+        );
+
+        assert_eq!(axes.fwd, 1);
+        assert_eq!(axes.side, 1);
+        assert_eq!(axes.analog, Vec2::new(0.6, 0.8));
+        assert!(axes.translating);
+        assert!((player.face_yaw - camera_yaw).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn an_idle_analog_axis_does_not_claim_translation() {
+        let binds = BindingsState::default();
+        let mut player = Player::default();
+        let axes = move_axes(
+            &binds,
+            &mut player,
+            Vec2::ZERO,
+            player.face_yaw,
+            false,
+            true,
+            true,
+        );
+
+        assert!(!axes.translating);
+        assert_eq!(axes.analog, Vec2::ZERO);
     }
 
     /// `0x515090` cancels on the command press (`0x5150ce`), and nothing between the press and

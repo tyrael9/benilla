@@ -18,7 +18,7 @@ concurrency:
 jobs:
   gates:
     # A branch of this repository runs the full chain before it lands; a fork's pull request runs here.
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name != github.repository
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 150
     env:

@@ -24,6 +24,18 @@ bevy_dynamic_linking = ["bevy/dynamic_linking"]
 # SDL3 provides desktop gamepad input; initialize before winit starts its event loop.
 sdl3 = { version = "0.16.0", features = ["build-from-source"] }
 
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2 = "0.6"
+objc2-game-controller = { version = "0.3.2", default-features = false, features = [
+    "GCController",
+    "GCExtendedGamepad",
+    "GCPhysicalInputProfile",
+    "GCControllerElement",
+    "GCControllerButtonInput",
+    "GCControllerDirectionPad",
+    "GCControllerAxisInput",
+] }
+
 [dependencies]
 anyhow.workspace = true
 # The EditBox clipboard, on the main thread as NSPasteboard requires; bevy_egui's 3.x.

@@ -3,8 +3,8 @@
 //! SDL is initialized before Bevy starts its window/event loop. The app owns a
 //! normalized snapshot; the Lua bridge only receives a copy of that snapshot.
 
-use benilla_ui::script::{GamepadLuaState, UiScript};
 use bevy::prelude::*;
+use benilla_ui::script::{GamepadLuaState, UiScript};
 
 #[cfg(not(target_os = "ios"))]
 use sdl3::gamepad::{Axis, Button, Gamepad};
@@ -179,10 +179,7 @@ fn poll_platform_gamepad(mut snapshot: ResMut<GamepadSnapshot>) {
     snapshot.0 = state;
 }
 
-fn publish_gamepad_snapshot(
-    snapshot: Res<GamepadSnapshot>,
-    script: Option<NonSendMut<UiScript>>,
-) {
+fn publish_gamepad_snapshot(snapshot: Res<GamepadSnapshot>, script: Option<NonSendMut<UiScript>>) {
     let Some(mut script) = script else {
         return;
     };

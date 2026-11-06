@@ -104,10 +104,10 @@ fn inject_touch_input(
     time: Res<Time>,
     script: Option<NonSend<UiScript>>,
 ) {
-    use bevy::input::ButtonState;
+    use crate::ui_script::{Record, UiScreen};
     use bevy::input::mouse::MouseButton;
     use bevy::input::touch::TouchPhase;
-    use crate::ui_script::{Record, UiScreen};
+    use bevy::input::ButtonState;
 
     const WORLD_LONG_PRESS_SECS: f32 = 1.0;
     const UI_LONG_PRESS_SECS: f32 = 3.0;
@@ -146,12 +146,24 @@ fn inject_touch_input(
     let lt_owns_pointer = snapshot.current.zl > 0.5;
     let mut stick = (132.0_f32, 136.0_f32, 112.0_f32, 63.0_f32, true, false);
     if let Some(script) = script.as_deref() {
-        stick.0 = script.eval("return Gamepad_GetTouchStickValue('X')").unwrap_or(stick.0);
-        stick.1 = script.eval("return Gamepad_GetTouchStickValue('Y')").unwrap_or(stick.1);
-        stick.2 = script.eval("return Gamepad_GetTouchStickValue('Radius')").unwrap_or(stick.2);
-        stick.3 = script.eval("return Gamepad_GetTouchStickValue('Travel')").unwrap_or(stick.3);
-        stick.4 = script.eval("return Gamepad_IsTouchStickEnabled()").unwrap_or(stick.4);
-        stick.5 = script.eval("return Gamepad_IsTouchStickUnlocked()").unwrap_or(stick.5);
+        stick.0 = script
+            .eval("return Gamepad_GetTouchStickValue('X')")
+            .unwrap_or(stick.0);
+        stick.1 = script
+            .eval("return Gamepad_GetTouchStickValue('Y')")
+            .unwrap_or(stick.1);
+        stick.2 = script
+            .eval("return Gamepad_GetTouchStickValue('Radius')")
+            .unwrap_or(stick.2);
+        stick.3 = script
+            .eval("return Gamepad_GetTouchStickValue('Travel')")
+            .unwrap_or(stick.3);
+        stick.4 = script
+            .eval("return Gamepad_IsTouchStickEnabled()")
+            .unwrap_or(stick.4);
+        stick.5 = script
+            .eval("return Gamepad_IsTouchStickUnlocked()")
+            .unwrap_or(stick.5);
     }
     let centre = Vec2::new(stick.0, stick.1);
 
@@ -189,13 +201,14 @@ fn inject_touch_input(
         }
     }
 
-    let touch_events: Vec<_> = events.read().map(|touch| (touch.id, touch.phase, touch.position)).collect();
+    let touch_events: Vec<_> = events
+        .read()
+        .map(|touch| (touch.id, touch.phase, touch.position))
+        .collect();
     for (id, phase, raw) in touch_events {
         let ui = to_ui(raw);
         let hit = script.as_deref().and_then(|s| s.hit_test(ui.x, ui.y));
-        let hit_name = script
-            .as_deref()
-            .and_then(|s| s.hit_test_name(ui.x, ui.y));
+        let hit_name = script.as_deref().and_then(|s| s.hit_test_name(ui.x, ui.y));
         let hit_ui = hit.is_some_and(|frame| {
             script.as_deref().is_some_and(|s| !s.is_world_frame(frame))
                 && (stick.5 || hit_name.as_deref() != Some("BenillaMobileTouchStick"))
@@ -329,11 +342,12 @@ fn inject_touch_input(
                 let gesture = state.world.take().expect("matched world touch");
                 state.world_pointer = Some(raw);
                 if phase == TouchPhase::Ended && !gesture.dragging && !gesture.right_down {
-                    let button = if time.elapsed_secs() - gesture.started_at >= WORLD_LONG_PRESS_SECS {
-                        MouseButton::Right
-                    } else {
-                        MouseButton::Left
-                    };
+                    let button =
+                        if time.elapsed_secs() - gesture.started_at >= WORLD_LONG_PRESS_SECS {
+                            MouseButton::Right
+                        } else {
+                            MouseButton::Left
+                        };
                     generated.push(pointer_record(
                         Record::Button {
                             button,

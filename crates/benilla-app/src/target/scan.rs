@@ -278,7 +278,12 @@ impl TargetScan<'_, '_> {
                 .as_ref()
                 .is_some_and(|g| g.party_or_raid_member(guid)),
             ScanSide::Interactable => false,
-            ScanSide::Smart => pair.is_some_and(|(me, unit)| rel.can_attack(&me, &unit)),
+            ScanSide::Smart => {
+                if store.is_some_and(|s| s.0.unit_reads_dead()) {
+                    return false;
+                }
+                pair.is_some_and(|(me, unit)| rel.can_attack(&me, &unit))
+            },
         }
     }
 
@@ -1892,6 +1897,33 @@ mod tests {
     }
 
     /// No combat lock: an attacker in the pool never shrinks it.
+    #[test]
+    fn friend_scan_prioritizes_party_before_other_raid_members() {
+        let mut party = cand(1, 10.0, true);
+        party.friend_priority = 0;
+        let mut other_subgroup = cand(2, -10.0, true);
+        other_subgroup.friend_priority = 1;
+        let mut unrelated = cand(3, -20.0, true);
+        unrelated.friend_priority = 2;
+
+        let mut candidates = [unrelated, other_subgroup, party];
+        candidates.sort_by(candidate_order);
+        assert_eq!(
+            candidates.map(|candidate| candidate.guid),
+            [1, 2, 3],
+            "same-party members beat closer-looking raid members within the same screen tier"
+        );
+
+        // The usual visible-target tier still outranks a party member outside the viewport.
+        let mut offscreen_party = party;
+        offscreen_party.on_screen = false;
+        let mut visible_raid = other_subgroup;
+        visible_raid.score = 100.0;
+        let mut candidates = [offscreen_party, visible_raid];
+        candidates.sort_by(candidate_order);
+        assert_eq!(candidates.map(|candidate| candidate.guid), [2, 1]);
+    }
+
     #[test]
     fn tier_pool_never_locks() {
         let mut v = [cand(1, 0.1, false), cand(2, 5.0, true), cand(3, 0.5, true)];

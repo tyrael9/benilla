@@ -48,6 +48,8 @@ jobs:
       # binding dispatch, and (on its own target) the iOS GameController adapter.
       - name: app gamepad integration check
         run: cargo check -p benilla-app --no-default-features --lib
+      - name: app test code type-check
+        run: cargo check -p benilla-app --no-default-features --tests
 
   full-linux:
     if: github.event_name == 'workflow_dispatch'

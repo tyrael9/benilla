@@ -52,6 +52,8 @@ pub(crate) enum GamepadButton {
 pub(crate) struct GamepadBindings {
     /// The action command selected on press; modifier changes must not alter its release.
     latched: Vec<(GamepadButton, &'static str)>,
+    /// The modifier has been initialized for the current Lua VM.
+    modifier_initialized: bool,
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -168,7 +170,7 @@ pub(crate) fn dispatch_action_bindings(
     let now = snapshot.current;
     let was = snapshot.previous;
 
-    if now.l != was.l || now.r != was.r {
+    if now.l != was.l || now.r != was.r || !bindings.modifier_initialized {
         let command = if now.l {
             "GAMEPAD_MODIFIER_L"
         } else if now.r {
@@ -179,6 +181,7 @@ pub(crate) fn dispatch_action_bindings(
         if let Err(error) = script.execute_binding(command, true) {
             warn!("gamepad binding {command}: {error}");
         }
+        bindings.modifier_initialized = true;
     }
 
     let buttons = [

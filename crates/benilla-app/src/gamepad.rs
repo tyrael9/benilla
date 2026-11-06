@@ -144,27 +144,10 @@ fn inject_touch_input(
     }
 
     let lt_owns_pointer = snapshot.current.zl > 0.5;
-    let mut stick = (132.0_f32, 136.0_f32, 112.0_f32, 63.0_f32, true, false);
-    if let Some(script) = script.as_deref() {
-        stick.0 = script
-            .eval("return Gamepad_GetTouchStickValue('X')")
-            .unwrap_or(stick.0);
-        stick.1 = script
-            .eval("return Gamepad_GetTouchStickValue('Y')")
-            .unwrap_or(stick.1);
-        stick.2 = script
-            .eval("return Gamepad_GetTouchStickValue('Radius')")
-            .unwrap_or(stick.2);
-        stick.3 = script
-            .eval("return Gamepad_GetTouchStickValue('Travel')")
-            .unwrap_or(stick.3);
-        stick.4 = script
-            .eval("return Gamepad_IsTouchStickEnabled()")
-            .unwrap_or(stick.4);
-        stick.5 = script
-            .eval("return Gamepad_IsTouchStickUnlocked()")
-            .unwrap_or(stick.5);
-    }
+    let stick = script.as_deref().map_or(
+        (132.0_f32, 136.0_f32, 112.0_f32, 63.0_f32, true, false),
+        UiScript::touch_stick_settings,
+    );
     let centre = Vec2::new(stick.0, stick.1);
 
     // Evaluate long presses even on frames with no TouchMoved event.

@@ -1112,6 +1112,20 @@ impl UiScript {
         self.model_mut().gamepad = state;
     }
 
+    /// The mobile movement-stick settings used by the engine's touch recognizer. This is a direct
+    /// model read, not a Lua evaluation, so the per-frame touch path does not run FrameScript code.
+    pub fn touch_stick_settings(&self) -> (f32, f32, f32, f32, bool, bool) {
+        let model = self.model_ref();
+        (
+            model.touch_stick_center_x,
+            model.touch_stick_center_y,
+            model.touch_stick_radius,
+            model.touch_stick_travel,
+            model.touch_stick_enabled,
+            model.touch_stick_unlocked,
+        )
+    }
+
     /// Run one nearest-target cycle from an engine-owned input such as the controller's R3 press.
     /// The caller must lend the script-call host (for example through `VmWith::run`).
     pub fn target_nearest(&self, mode: NearestMode, reverse: bool) -> mlua::Result<()> {

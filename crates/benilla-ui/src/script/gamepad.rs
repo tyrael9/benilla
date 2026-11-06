@@ -206,6 +206,10 @@ mod tests {
 
         assert_eq!((x, y, radius, travel), (120.0, 240.0, 180.0, 24.0));
         assert!(enabled && unlocked);
+        assert_eq!(
+            script.touch_stick_settings(),
+            (120.0, 240.0, 180.0, 24.0, true, true)
+        );
         let is_touch: bool = script.eval("Gamepad_IsTouchDevice()").unwrap();
         assert_eq!(is_touch, cfg!(target_os = "ios"));
     }

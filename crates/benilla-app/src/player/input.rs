@@ -280,15 +280,6 @@ fn discrete_axis(value: f32) -> i32 {
     }
 }
 
-fn apply_deadzone(value: Vec2, deadzone: f32) -> Vec2 {
-    let magnitude = value.length();
-    if magnitude <= deadzone {
-        return Vec2::ZERO;
-    }
-    let direction = value / magnitude;
-    direction * ((magnitude - deadzone) / (1.0 - deadzone)).clamp(0.0, 1.0)
-}
-
 /// The transition into both mouse bits held (`0x514a73`, `0x5150e2`): a primary bit rose with the
 /// other held, MOVEANDSTEER's among them.
 pub(super) fn both_engaged(binds: &crate::bindings::BindingsState) -> bool {

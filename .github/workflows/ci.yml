@@ -44,6 +44,6 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       # Same package and default features as the local release run.
       - name: Compile macOS app (default features)
-        run: cargo check --locked --release -p benilla
+        run: cargo check --release -p benilla
       - name: Show compiler cache stats
         run: sccache --show-stats

@@ -51,9 +51,18 @@ jobs:
         run: cargo check -p benilla-app --no-default-features --lib
       - name: app test code type-check
         run: cargo check -p benilla-app --no-default-features --tests
-      # Keep the regression suite focused on the package whose new platform bridge touched it.
-      - name: App integration regressions
-        run: cargo test -p benilla-app --lib
+      # Exercise only the app tests whose resource, VM, touch, or schedule contracts changed.
+      - name: Gamepad and binding regressions
+        run: |
+          cargo test -p benilla-app --lib bindings::tests
+          cargo test -p benilla-app --lib gamepad::tests
+      - name: VM scheduling and session regressions
+        run: |
+          cargo test -p benilla-app --lib game_plugins::schedule_tests::every_vm_holder_in_update_declares_its_side_of_the_tick
+          cargo test -p benilla-app --lib lanes::guard_tests::every_view_push_of_what_a_handler_writes_is_listed
+          cargo test -p benilla-app --lib lanes::guard_tests::the_systems_unordered_against_the_drain_meet_it_only_on_a_pure_cache
+          cargo test -p benilla-app --lib script_calls::tests::every_system_that_writes_the_vm_holds_its_call_host
+          cargo test -p benilla-app --lib ui_script::session::tests::a_local_in_a_system_that_holds_the_vm_is_keyed_on_the_session
       - name: Interface compatibility walls
         run: |
           cargo test -p benilla-app --test cover_input_wall

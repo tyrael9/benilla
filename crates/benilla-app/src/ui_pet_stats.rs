@@ -439,6 +439,11 @@ mod tests {
             (Some("Boar".into()), None, boar_diet.clone()),
         );
         assert!(!s.hunter_pet);
+        assert_eq!(
+            s.family.as_deref(),
+            Some("Boar"),
+            "the word stays paired with GetPetIcon even when hunter-only stats are gated"
+        );
         assert!(
             s.food_types.is_empty(),
             "…but the diet shares 0x6116e0 with the stats"

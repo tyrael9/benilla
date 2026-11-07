@@ -39,24 +39,37 @@ impl GamepadSnapshot {
             return Vec2::ZERO;
         }
 
-        let axis = self.virtual_mouse_axis();
+        // Camera look keeps the legacy radial deadzone/remapping.
+        self.legacy_right_stick_down_axis(true)
+    }
 
+    /// The LT pointer historically used a threshold-only deadzone: below 0.15 it stopped, but
+    /// above that it retained the raw stick magnitude. Keep this distinct from camera look.
+    pub(crate) fn virtual_mouse_axis(&self) -> Vec2 {
+        self.legacy_right_stick_down_axis(false)
+    }
+
+    fn legacy_right_stick_down_axis(&self, remap_deadzone: bool) -> Vec2 {
+        let raw = Vec2::new(self.current.right_x, self.current.right_y);
+        let axis = if remap_deadzone {
+            apply_deadzone(raw, 0.15)
+        } else if raw.length() < 0.15 {
+            Vec2::ZERO
+        } else {
+            raw
+        };
+
+        // SDL snapshots store right_y positive-up; the legacy gamepad pointer/camera consumed
+        // positive-down. GameController snapshots already use that legacy convention.
         #[cfg(not(target_os = "ios"))]
         {
-            // SDL snapshots use a unified positive-up right_y for the virtual pointer, while the
-            // legacy SDL camera path consumed positive-down. Flip only the camera view.
             Vec2::new(axis.x, -axis.y)
         }
 
         #[cfg(target_os = "ios")]
         {
-            // GameController's legacy path already used positive-up for camera look.
             axis
         }
-    }
-
-    pub(crate) fn virtual_mouse_axis(&self) -> Vec2 {
-        apply_deadzone(Vec2::new(self.current.right_x, self.current.right_y), 0.15)
     }
 }
 

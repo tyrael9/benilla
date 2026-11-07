@@ -10,8 +10,8 @@
 //! Kept from 1.12: the validity filters (`0x493e40`, `CanAttack 0x606980`, critters), the
 //! [`commit_owing`] through `SetSelection` (`0x493540`), the attack acquire (`0x612df0` at `0x6130b5`),
 //! the ATTACKERSTATEUPDATE and spell start acquires (`0x6259c9`–`0x6259fe`, `0x6e7963`-`0x6e799c`)
-//! and the `targetNearestDistance` CVar's live value. The controller-owned R3 path supplies
-//! its legacy fixed 41-yard radius as an explicit scan override.
+//! and the `targetNearestDistance` CVar's live value. Controller R3 shares that configured
+//! radius while restricting its candidate pool to the camera viewport.
 
 use benilla_formats::CreatureTypeTable;
 use benilla_protocol::{guid, EntityKind};
@@ -412,9 +412,8 @@ impl TargetScan<'_, '_> {
         self.build_with_range(side, self.configured_range(), false)
     }
 
-    /// The same candidate pool with an explicit engine-owned range, used by R3 to preserve its
-    /// legacy fixed 41-yard controller radius without changing the stock targetNearestDistance CVar.
-    /// `require_in_view` rejects candidates outside the actual camera viewport before pooling.
+    /// Build the same candidate pool at the supplied range. R3 passes the live CVar value and
+    /// sets `require_in_view` to reject candidates outside the actual camera viewport.
     fn build_with_range(
         &self,
         side: ScanSide,
@@ -991,7 +990,7 @@ pub(super) fn commit(
 pub(super) fn cycle(
     side: ScanSide,
     reverse: bool,
-    range_override: Option<f32>,
+    require_in_view: bool,
     now: f64,
     scan: &TargetScan,
     history: &mut TabHistory,
@@ -1003,22 +1002,16 @@ pub(super) fn cycle(
     history.enter(side);
     history.prune(now);
     let trace = tab_trace_on();
-    let range = range_override.unwrap_or_else(|| scan.configured_range());
+    let range = scan.configured_range();
     if trace {
         info!(
-            "tab-trace: {side:?} press (reverse={reverse}), range {range:.1} yd ({}), selection {:?}, history {}",
-            if range_override.is_some() {
-                "controller override"
-            } else {
-                "targetNearestDistance"
-            },
+            "tab-trace: {side:?} press (reverse={reverse}), range {range:.1} yd (targetNearestDistance), selection {:?}, history {}",
             selection.guid.map(|g| format!("{g:#x}")),
             history.visited.len()
         );
     }
-    // An explicit range is the controller-owned R3 path. It keeps the 41 yd radius, but unlike
-    // the stock keyboard/script cycler it must never fall back to a point outside the camera view.
-    let require_in_view = range_override.is_some();
+    // Keyboard/script targeting keeps its historical off-screen fallback. Controller R3 uses the
+    // same live CVar range but never falls back to candidates outside the camera viewport.
     let cands = scan.build_with_range(side, range, require_in_view);
     if cands.is_empty() {
         if trace {
@@ -1186,7 +1179,7 @@ impl AttackPick<'_, '_> {
             return cycle(
                 ScanSide::Enemy,
                 false,
-                None,
+                false,
                 self.time.elapsed_secs_f64(),
                 &self.scan,
                 &mut self.history,
@@ -2403,20 +2396,12 @@ mod tests {
         world.resource_mut::<super::super::TabRange>().0 = 20.0;
         assert_eq!(pool(&mut world), [NEAR]);
 
-        // R3 retains its legacy fixed range even when the stock target CVar is customized.
-        let controller_pool = world
-            .run_system_once(|scan: TargetScan| {
-                scan.build_with_range(ScanSide::Enemy, 41.0, false)
-                    .iter()
-                    .map(|c| c.guid)
-                    .collect::<Vec<_>>()
-            })
-            .expect("the controller scan runs as a one-shot system");
-        assert_eq!(
-            controller_pool,
-            [NEAR, FAR, EDGE],
-            "41 yd includes 40.5 and rejects 41.5 even when the CVar is 20"
-        );
+        // R3 uses this same live CVar range; its separate viewport flag only narrows the
+        // candidate pool spatially and does not substitute a fixed radius.
+        let r3_range = world
+            .run_system_once(|scan: TargetScan| scan.configured_range())
+            .expect("the controller scan reads the configured range");
+        assert_eq!(r3_range, 20.0, "R3 shares targetNearestDistance");
     }
 
     #[test]

@@ -51,6 +51,15 @@ jobs:
         run: cargo check -p benilla-app --no-default-features --lib
       - name: app test code type-check
         run: cargo check -p benilla-app --no-default-features --tests
+      # Keep the regression suite focused on the package whose new platform bridge touched it.
+      - name: App integration regressions
+        run: cargo test -p benilla-app --lib
+      - name: Interface compatibility walls
+        run: |
+          cargo test -p benilla-app --test cover_input_wall
+          cargo test -p benilla-app --test ui_script_wall
+          cargo test -p benilla-ui --lib script::tests::reference_surface
+          cargo test -p benilla-ui --test vm_parity
       - name: Show compiler cache stats
         run: sccache --show-stats
 

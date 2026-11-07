@@ -399,9 +399,9 @@ fn inject_touch_input(
 /// window point is published for the UI walk and the world hover pick.
 #[derive(Resource, Clone, Copy, Debug, Default)]
 pub(crate) struct GamepadVirtualMouse {
-    active: bool,
+    pub(crate) active: bool,
     initialized: bool,
-    position_ui: Vec2,
+    pub(crate) position_ui: Vec2,
     pub(crate) window_position: Option<Vec2>,
     left_down: bool,
     right_down: bool,

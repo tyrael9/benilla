@@ -365,6 +365,7 @@ pub(super) fn control(
         &speed_capsule.3,
     );
     let binds = &speed_capsule.4;
+    let gamepad = &speed_capsule.14;
     let view_subject = &speed_capsule.5;
     let self_guid = speed_capsule.6 .0;
     let scoped = &speed_capsule.7;
@@ -484,6 +485,38 @@ pub(super) fn control(
     );
     glide_zoom(dt, &mut rig, zoom_max, pointer.2.move_speed);
     camera_view::step_pitch(&mut rig, &mut cam, dt);
+
+    // Preserve the original controller swim-pitch path. The split LookSample hand-off below only
+    // reports mouse/button motion; a right-stick-only look never sets hands_off, so without this
+    // explicit path the swimmer keeps a level mover pitch and cannot dive.
+    let gamepad_look = gamepad.look_axis();
+    let gamepad_owns_swim_pitch = player.swimming && gamepad.current.zl <= 0.5;
+    if gamepad_owns_swim_pitch {
+        let near_surface = match player.liquid_surface {
+            Some(surface_y) => {
+                let depth = surface_y - player.pos.y;
+                depth <= swim::swim_enter_depth(player.collision_height.0) + 0.5
+            }
+            None => false,
+        };
+
+        if near_surface {
+            // At the surface ignore the camera's ordinary downward bias unless the vertical
+            // stick is deliberately pushed; this prevents accidental dives while merely looking.
+            if gamepad_look.y.abs() > 0.5 {
+                let aim_pitch = cam.pitch + rig.smart_pivot.bias();
+                player.mover_pitch =
+                    aim_pitch.clamp(-MOUSELOOK_PITCH_CLAMP, MOUSELOOK_PITCH_CLAMP);
+            } else {
+                player.mover_pitch = 0.0;
+            }
+        } else if gamepad_look.y.abs() > 0.05 {
+            // Underwater the full stick range controls the swim mover pitch responsively.
+            let aim_pitch = cam.pitch + rig.smart_pivot.bias();
+            player.mover_pitch =
+                aim_pitch.clamp(-MOUSELOOK_PITCH_CLAMP, MOUSELOOK_PITCH_CLAMP);
+        }
+    }
 
     // Free fly is a dev tool on the dev chord: a bare `F` is the player's to bind.
     if crate::run_mode::dev_chord(&keys, KeyCode::KeyF) {
@@ -619,7 +652,7 @@ pub(super) fn control(
         let axes = input::move_axes(
             binds,
             &mut player,
-            speed_capsule.14.move_axis(),
+            gamepad.move_axis(),
             cam.yaw,
             both_buttons,
             may_translate,
@@ -856,7 +889,7 @@ pub(super) fn control(
         // SWIMMING test (`0x7c6f91`). A left-drag orbit steers nothing. It is written per mouse
         // motion (event `0x400500cb`), not per frame, so other writers survive a still mouse. The
         // aim includes the pivot bias, as `0x5103e0` passes `[cam+0x104] + [cam+0xf4]`.
-        if hands_off {
+        if hands_off && !gamepad_owns_swim_pitch {
             swim::hand_off_pitch(&mut player, cam.pitch + rig.smart_pivot.bias());
             if let Some(call) = speed_capsule.13.as_deref_mut() {
                 call.frame_wrote();

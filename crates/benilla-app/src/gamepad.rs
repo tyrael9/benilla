@@ -33,10 +33,14 @@ impl GamepadSnapshot {
 
     pub(crate) fn look_axis(&self) -> Vec2 {
         if self.current.zl > 0.5 {
-            Vec2::ZERO
-        } else {
-            self.virtual_mouse_axis()
+            return Vec2::ZERO;
         }
+
+        // right_y is stored positive-up for the virtual pointer (UI coordinates). The legacy
+        // camera path consumes positive-down, as the original SDL GamepadState did. Flip only
+        // the camera view here; virtual_mouse_axis() remains unchanged.
+        let axis = self.virtual_mouse_axis();
+        Vec2::new(axis.x, -axis.y)
     }
 
     pub(crate) fn virtual_mouse_axis(&self) -> Vec2 {
@@ -1152,6 +1156,29 @@ mod tests {
             ),
             Vec2::splat(100.0)
         );
+    }
+
+    #[test]
+    fn camera_look_uses_the_legacy_down_positive_pitch_axis() {
+        let up = GamepadSnapshot {
+            current: GamepadLuaState {
+                right_y: 1.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let down = GamepadSnapshot {
+            current: GamepadLuaState {
+                right_y: -1.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        assert_eq!(up.look_axis(), -Vec2::Y);
+        assert_eq!(down.look_axis(), Vec2::Y);
+        // The virtual pointer keeps its own UI-up convention.
+        assert_eq!(up.virtual_mouse_axis(), Vec2::Y);
     }
 
     #[test]

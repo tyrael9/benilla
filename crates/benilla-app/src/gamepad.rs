@@ -59,17 +59,9 @@ impl GamepadSnapshot {
             raw
         };
 
-        // SDL snapshots store right_y positive-up; the legacy gamepad pointer/camera consumed
-        // positive-down. GameController snapshots already use that legacy convention.
-        #[cfg(not(target_os = "ios"))]
-        {
-            Vec2::new(axis.x, -axis.y)
-        }
-
-        #[cfg(target_os = "ios")]
-        {
-            axis
-        }
+        // Both platform pollers normalize right-stick Y to the legacy positive-down
+        // convention before publishing the snapshot. Consumers must not invert it again.
+        axis
     }
 }
 
@@ -1204,21 +1196,10 @@ mod tests {
             ..Default::default()
         };
 
-        #[cfg(not(target_os = "ios"))]
-        {
-            // SDL snapshots store right_y positive-up; consumers use positive-down.
-            assert_eq!(up.look_axis(), -Vec2::Y);
-            assert_eq!(down.look_axis(), Vec2::Y);
-            assert_eq!(up.virtual_mouse_axis(), -Vec2::Y);
-        }
-
-        #[cfg(target_os = "ios")]
-        {
-            // GameController snapshots already use the legacy positive-down convention.
-            assert_eq!(up.look_axis(), Vec2::Y);
-            assert_eq!(down.look_axis(), -Vec2::Y);
-            assert_eq!(up.virtual_mouse_axis(), Vec2::Y);
-        }
+        // Both platform pollers publish positive-down Y; consumers must not invert it.
+        assert_eq!(up.look_axis(), Vec2::Y);
+        assert_eq!(down.look_axis(), -Vec2::Y);
+        assert_eq!(up.virtual_mouse_axis(), Vec2::Y);
 
         // LT virtual mouse keeps raw magnitude above the threshold; camera look remaps it.
         let half = GamepadSnapshot {

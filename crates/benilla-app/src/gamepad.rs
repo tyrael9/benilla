@@ -9,6 +9,9 @@ use bevy::prelude::*;
 #[cfg(not(target_os = "ios"))]
 use sdl3::gamepad::{Axis, Button, Gamepad};
 
+/// The original controller's R3 target scan radius.
+const LEGACY_R3_TARGET_RANGE_YARDS: f32 = 41.0;
+
 #[derive(Resource, Clone, Copy, Debug, Default)]
 pub(crate) struct GamepadSnapshot {
     pub(crate) current: GamepadLuaState,
@@ -852,7 +855,7 @@ fn gamepad_r3_target_nearest(
     let mode = r3_target_mode(state, in_combat);
     vm.run(|script| {
         if let Some(script) = script {
-            if let Err(error) = script.target_nearest_with_range(mode, false, Some(41.0)) {
+            if let Err(error) = script.target_nearest_with_range(mode, false, Some(LEGACY_R3_TARGET_RANGE_YARDS)) {
                 warn!("gamepad R3 target cycle: {error}");
             }
         }

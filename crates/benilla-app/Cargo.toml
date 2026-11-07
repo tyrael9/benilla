@@ -23,6 +23,8 @@ bevy_dynamic_linking = ["bevy/dynamic_linking"]
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 # SDL3 provides desktop gamepad input; initialize before winit starts its event loop.
 sdl3 = { version = "0.16.0", features = ["build-from-source", "build-from-source-unix-console"] }
+# The native no-install fatal dialog; iOS reports on stderr without a desktop dialog backend.
+rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
 
 [target.'cfg(target_os = "ios")'.dependencies]
 objc2 = "0.6"
@@ -92,10 +94,6 @@ mint = "0.5"
 rand = "0.8"
 # The account-data sections' digests, MD5 as the reference's (`0x5af940`) and the server's.
 md-5 = "0.10.6"
-
-# The native no-install fatal dialog. iOS has no desktop dialog backend and reports on stderr.
-[target.'cfg(not(target_os = "ios"))'.dependencies]
-rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
 
 # Wayland clipboard over the standard `wl_data_device`; arboard's speaks `wlr-data-control`,
 # which GNOME does not implement.

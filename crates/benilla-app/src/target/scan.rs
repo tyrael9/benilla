@@ -90,6 +90,9 @@ struct Candidate {
     entity: Entity,
     guid: u64,
     kind: EntityKind,
+    /// Inside the actual camera viewport (including its outer edge band).
+    in_view: bool,
+    /// Inside the pulled-in priority region; visible edge-band candidates remain eligible.
     on_screen: bool,
     score: f32,
     /// Party/subgroup first for Friend scans, followed by other raid members.
@@ -114,12 +117,25 @@ fn candidate_order(a: &Candidate, b: &Candidate) -> std::cmp::Ordering {
         .then(a.score.total_cmp(&b.score))
 }
 
-/// The on-screen tier when it is not empty, else every candidate (`AllowAnyOnScreen` = 1).
-fn select_pool(cands: &[Candidate]) -> Vec<Candidate> {
-    if cands.iter().any(|c| c.on_screen) {
-        cands.iter().filter(|c| c.on_screen).copied().collect()
+/// The pulled-in screen tier when it is not empty, otherwise the eligible fallback tier.
+///
+/// Stock TargetNearest keeps the historical off-screen fallback. Controller R3 asks for
+/// `require_in_view`, which removes points outside the actual camera viewport first; visible
+/// points in the outer 10% edge band remain valid fallback candidates.
+fn select_pool(cands: &[Candidate], require_in_view: bool) -> Vec<Candidate> {
+    let eligible: Vec<_> = cands
+        .iter()
+        .filter(|candidate| !require_in_view || candidate.in_view)
+        .copied()
+        .collect();
+
+    if eligible.iter().any(|candidate| candidate.on_screen) {
+        eligible
+            .into_iter()
+            .filter(|candidate| candidate.on_screen)
+            .collect()
     } else {
-        cands.to_vec()
+        eligible
     }
 }
 
@@ -391,32 +407,58 @@ impl TargetScan<'_, '_> {
 
     /// Filter, project, score and sort every known unit, fresh each press.
     fn build(&self, side: ScanSide) -> Vec<Candidate> {
-        self.build_with_range(side, self.configured_range())
+        self.build_with_range(side, self.configured_range(), false)
     }
 
     /// The same candidate pool with an explicit engine-owned range, used by R3 to preserve its
     /// legacy fixed 41-yard controller radius without changing the stock targetNearestDistance CVar.
-    fn build_with_range(&self, side: ScanSide, range: f32) -> Vec<Candidate> {
+    /// `require_in_view` rejects candidates outside the actual camera viewport before pooling.
+    fn build_with_range(
+        &self,
+        side: ScanSide,
+        range: f32,
+        require_in_view: bool,
+    ) -> Vec<Candidate> {
         let Ok((self_tf, _, self_guid)) = self.self_q.single() else {
             return Vec::new();
         };
         let me = self_guid.map(|g| g.0);
         let cam = self.camera.single().ok();
-        // Off-centerness on the pulled-in screen, 0 at the centre and about 1 at a corner, `None`
-        // outside it. Callers project the root + 1 yd, so feet just below the edge still count.
-        let project = |world: Vec3| -> Option<f32> {
-            let (camera, cam_pose) = cam?;
+        // Return actual viewport membership separately from the pulled-in priority score.
+        // Camera projection fails for points behind the camera or beyond its near/far planes.
+        // A successful projection may still land in the outer viewport edge band: that is
+        // visible, but not part of the preferred 80% screen region.
+        // Callers project the root + 1 yd, so feet just below the edge still count.
+        let project = |world: Vec3| -> (bool, Option<f32>) {
+            let Some((camera, cam_pose)) = cam else {
+                return (false, None);
+            };
             let cam_tf = GlobalTransform::from(*cam_pose);
-            let vp = camera.logical_viewport_size()?;
-            let screen = camera.world_to_viewport(&cam_tf, world).ok()?;
-            let x0 = vp.x * FRUSTUM_PULL_SIDES;
-            let x1 = vp.x * (1.0 - FRUSTUM_PULL_SIDES);
-            let y0 = vp.y * FRUSTUM_PULL_TOP;
-            let y1 = vp.y * (1.0 - FRUSTUM_PULL_BOT);
-            if screen.x < x0 || screen.x > x1 || screen.y < y0 || screen.y > y1 {
-                return None;
+            let Some(viewport) = camera.logical_viewport_rect() else {
+                return (false, None);
+            };
+            let Ok(screen) = camera.world_to_viewport(&cam_tf, world) else {
+                return (false, None);
+            };
+            if screen.x < viewport.min.x
+                || screen.x > viewport.max.x
+                || screen.y < viewport.min.y
+                || screen.y > viewport.max.y
+            {
+                return (false, None);
             }
-            Some(screen.distance(vp * 0.5) / (vp.length() * 0.5))
+            let vp = viewport.max - viewport.min;
+            let x0 = viewport.min.x + vp.x * FRUSTUM_PULL_SIDES;
+            let x1 = viewport.min.x + vp.x * (1.0 - FRUSTUM_PULL_SIDES);
+            let y0 = viewport.min.y + vp.y * FRUSTUM_PULL_TOP;
+            let y1 = viewport.min.y + vp.y * (1.0 - FRUSTUM_PULL_BOT);
+            if screen.x < x0 || screen.x > x1 || screen.y < y0 || screen.y > y1 {
+                return (true, None);
+            }
+            (
+                true,
+                Some(screen.distance(viewport.min + vp * 0.5) / (vp.length() * 0.5)),
+            )
         };
         let trace = tab_trace_on();
         let trace_unit = |guid: u64, tf: &Transform, verdict: &str| {
@@ -496,14 +538,20 @@ impl TargetScan<'_, '_> {
                 );
                 continue;
             }
-            let off_center = project(tf.translation + Vec3::Y);
+            let (in_view, off_center) = project(tf.translation + Vec3::Y);
+            if require_in_view && !in_view {
+                trace_unit(guid_c.0, tf, "REJECT outside-view");
+                continue;
+            }
             // Enemy side only: a healer in combat and targeting you would head the CTRL-TAB pool.
             let cwm = side == ScanSide::Enemy && store.is_some_and(|s| combat_with_me(s, me));
             let score = priority_score(off_center, dist, range, cwm);
             if trace {
-                let screen = off_center
-                    .map(|c| format!("center+{c:.2}"))
-                    .unwrap_or_else(|| "OFF-SCREEN".into());
+                let screen = match (in_view, off_center) {
+                    (false, _) => "OUTSIDE-VIEW".to_string(),
+                    (true, None) => "VIEW-EDGE".to_string(),
+                    (true, Some(c)) => format!("center+{c:.2}"),
+                };
                 trace_unit(
                     guid_c.0,
                     tf,
@@ -517,6 +565,7 @@ impl TargetScan<'_, '_> {
                 entity,
                 guid: guid_c.0,
                 kind: net.kind,
+                in_view,
                 on_screen: off_center.is_some(),
                 score,
                 friend_priority: self.friend_priority(side, guid_c.0),
@@ -531,7 +580,13 @@ impl TargetScan<'_, '_> {
                     self.names
                         .resolve_unit(c.guid, None, Ask::Read)
                         .unwrap_or("?"),
-                    if c.on_screen { "on-screen" } else { "fallback" },
+                    if c.on_screen {
+                        "on-screen"
+                    } else if c.in_view {
+                        "view-edge"
+                    } else {
+                        "off-screen"
+                    },
                     c.score
                 );
             }
@@ -959,24 +1014,35 @@ pub(super) fn cycle(
             history.visited.len()
         );
     }
-    let cands = scan.build_with_range(side, range);
+    // An explicit range is the controller-owned R3 path. It keeps the 41 yd radius, but unlike
+    // the stock keyboard/script cycler it must never fall back to a point outside the camera view.
+    let require_in_view = range_override.is_some();
+    let cands = scan.build_with_range(side, range, require_in_view);
     if cands.is_empty() {
         if trace {
             info!("tab-trace: no candidates — target unchanged");
         }
         return Owed::default();
     }
-    let pool = select_pool(&cands);
+    let pool = select_pool(&cands, require_in_view);
+    if pool.is_empty() {
+        if trace {
+            info!("tab-trace: no in-view candidates — target unchanged");
+        }
+        return Owed::default();
+    }
     if trace {
+        let tier = if pool.iter().any(|c| c.on_screen) {
+            "priority-view"
+        } else if require_in_view {
+            "visible-edge"
+        } else {
+            "fallback"
+        };
         info!(
-            "tab-trace: pool {}/{} ({} tier)",
+            "tab-trace: pool {}/{} ({tier} tier)",
             pool.len(),
-            cands.len(),
-            if cands.iter().any(|c| c.on_screen) {
-                "on-screen"
-            } else {
-                "fallback"
-            }
+            cands.len()
         );
     }
     // Reverse walks the history back; an empty walk falls through to the forward pick.
@@ -1892,6 +1958,7 @@ mod tests {
             entity: Entity::PLACEHOLDER,
             guid,
             kind: EntityKind::Unit,
+            in_view: on_screen,
             on_screen,
             score,
             friend_priority: 2,
@@ -1957,15 +2024,43 @@ mod tests {
         );
 
         // Tier: with any on-screen candidate, off-screen ones drop out of the pool.
-        let pool = select_pool(&v);
+        let pool = select_pool(&v, false);
         assert_eq!(pool.iter().map(|c| c.guid).collect::<Vec<_>>(), [3, 2]);
-        // No on-screen candidates at all: the fallback tier is everything.
+        // No on-screen candidates at all: stock TargetNearest's fallback tier is everything.
         let off = [cand(1, 0.3, false), cand(2, 0.1, false)];
-        assert_eq!(select_pool(&off).len(), 2);
+        assert_eq!(select_pool(&off, false).len(), 2);
+
+        // R3 excludes candidates outside the actual viewport, but keeps an in-view point in the
+        // outer edge band when no point lies in the pulled-in priority region.
+        let mut edge = cand(4, 0.4, false);
+        edge.in_view = true;
+        assert_eq!(
+            select_pool(&[off[0], edge], true)
+                .iter()
+                .map(|candidate| candidate.guid)
+                .collect::<Vec<_>>(),
+            [4],
+            "visible edge fallback survives while the off-view candidate is removed"
+        );
+        assert!(
+            select_pool(&off, true).is_empty(),
+            "R3 must not fall back to targets behind/outside the camera viewport"
+        );
+
+        let mut visible_priority = cand(5, 0.8, true);
+        visible_priority.in_view = true;
+        assert_eq!(
+            select_pool(&[edge, visible_priority], true)
+                .iter()
+                .map(|candidate| candidate.guid)
+                .collect::<Vec<_>>(),
+            [5],
+            "the inner priority region still wins over the visible edge band"
+        );
 
         // With the attacker current and visited, the pick walks onto the peaceful mob.
         let mixed = [cand(1, -2.0, true), cand(2, 0.2, true)];
-        let pool = select_pool(&mixed);
+        let pool = select_pool(&mixed, false);
         assert_eq!(pool.len(), 2, "no combat lock — the full tier stays");
         assert_eq!(
             pick_forward(&pool, &[1], Some(1)),
@@ -2308,7 +2403,7 @@ mod tests {
         // R3 retains its legacy fixed range even when the stock target CVar is customized.
         let controller_pool = world
             .run_system_once(|scan: TargetScan| {
-                scan.build_with_range(ScanSide::Enemy, 41.0)
+                scan.build_with_range(ScanSide::Enemy, 41.0, false)
                     .iter()
                     .map(|c| c.guid)
                     .collect::<Vec<_>>()

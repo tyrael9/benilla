@@ -605,6 +605,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                         reverse,
                         may_cast,
                         range_override: None,
+                        require_in_view: false,
                     },
                 )?;
                 Ok(())

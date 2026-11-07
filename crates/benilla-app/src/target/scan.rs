@@ -1180,6 +1180,7 @@ impl AttackPick<'_, '_> {
             return cycle(
                 ScanSide::Enemy,
                 false,
+                None,
                 false,
                 self.time.elapsed_secs_f64(),
                 &self.scan,

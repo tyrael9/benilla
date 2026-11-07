@@ -30,6 +30,9 @@ const VERDICTS: &[(&str, Verdict)] = &[
     ("MouseMotion", Swallowed),
     ("MouseWheel", Swallowed),
     ("CursorMoved", Swallowed),
+    // TouchInput is an input channel; TouchPhase is only its phase enum.
+    ("TouchInput", Swallowed),
+    ("TouchPhase", Plumbing),
     // The stream the input records are read from, in the window's order.
     ("WindowEvent", Swallowed),
     ("AccumulatedMouseMotion", Swallowed),

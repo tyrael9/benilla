@@ -1091,7 +1091,6 @@ fn normalize_trigger(value: i16) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy::ecs::system::RunSystemOnce;
 
     #[test]
     fn both_sticks_use_the_radial_deadzone() {
@@ -1312,7 +1311,7 @@ mod tests {
 
     #[test]
     fn app_snapshot_is_published_to_lua() {
-        let script = UiScript::new().expect("in-game script");
+        let mut script = UiScript::new().expect("in-game script");
         let snapshot = GamepadSnapshot {
             current: GamepadLuaState {
                 connected: true,

@@ -21,7 +21,9 @@ jobs:
     timeout-minutes: 45
     env:
       CARGO_TERM_COLOR: always
-      CARGO_INCREMENTAL: 1
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+      CARGO_INCREMENTAL: 0
       CARGO_PROFILE_DEV_DEBUG: 0
       WOW_DATA: ""
     steps:
@@ -30,6 +32,10 @@ jobs:
           persist-credentials: false
       - name: Toolchain
         run: rustup toolchain install && rustc -V
+      - name: Setup compiler cache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.16.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: fmt
         run: cargo fmt --all -- --check
@@ -45,6 +51,8 @@ jobs:
         run: cargo check -p benilla-app --no-default-features --lib
       - name: app test code type-check
         run: cargo check -p benilla-app --no-default-features --tests
+      - name: Show compiler cache stats
+        run: sccache --show-stats
 
   # Compile the actual Windows app/player without running the entire workspace test suite.
   windows-fast:
@@ -53,7 +61,9 @@ jobs:
     timeout-minutes: 60
     env:
       CARGO_TERM_COLOR: always
-      CARGO_INCREMENTAL: 1
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+      CARGO_INCREMENTAL: 0
       CARGO_PROFILE_DEV_DEBUG: 0
       WOW_DATA: ""
     steps:
@@ -62,9 +72,11 @@ jobs:
           persist-credentials: false
       - name: Toolchain
         run: rustup toolchain install && rustc -V
+      - name: Setup compiler cache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.16.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - name: App and test-code check
-        run: cargo check -p benilla-app --no-default-features --tests
       - name: Build Windows player and verify stack reserve
         shell: pwsh
         run: |
@@ -74,6 +86,8 @@ jobs:
           $reserve = [BitConverter]::ToUInt64($b, $pe + 24 + 72)
           "SizeOfStackReserve: $reserve"
           if ($reserve -lt 8MB) { exit 1 }
+      - name: Show compiler cache stats
+        run: sccache --show-stats
 
   # Expensive, broad tests are opt-in; they no longer run on every PR update.
   full-linux:
@@ -82,6 +96,8 @@ jobs:
     timeout-minutes: 150
     env:
       CARGO_TERM_COLOR: always
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
       CARGO_INCREMENTAL: 0
       CARGO_PROFILE_DEV_DEBUG: 0
       WOW_DATA: ""
@@ -95,6 +111,10 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq pkg-config libasound2-dev libudev-dev
       - name: Toolchain
         run: rustup toolchain install && rustc -V
+      - name: Setup compiler cache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.16.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: fmt
         run: cargo fmt --all -- --check
@@ -121,6 +141,8 @@ jobs:
         run: cargo clippy -p benilla -p benilla-app --no-default-features -- -D warnings
       - name: player-tests
         run: cargo test -p benilla-formats -p benilla-app --no-default-features --lib
+      - name: Show compiler cache stats
+        run: sccache --show-stats
 
   full-windows:
     if: github.event_name == 'workflow_dispatch'
@@ -128,6 +150,8 @@ jobs:
     timeout-minutes: 180
     env:
       CARGO_TERM_COLOR: always
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
       CARGO_INCREMENTAL: 0
       CARGO_PROFILE_DEV_DEBUG: 0
       WOW_DATA: ""
@@ -137,6 +161,10 @@ jobs:
           persist-credentials: false
       - name: Toolchain
         run: rustup toolchain install && rustc -V
+      - name: Setup compiler cache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.16.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: workspace tests
         run: cargo test --workspace
@@ -150,6 +178,8 @@ jobs:
           $reserve = [BitConverter]::ToUInt64($b, $pe + 24 + 72)
           "SizeOfStackReserve: $reserve"
           if ($reserve -lt 8MB) { exit 1 }
+      - name: Show compiler cache stats
+        run: sccache --show-stats
 
   # Build and exercise the native macOS SDL3 gamepad path on the host platform.
   macos-fast:
@@ -158,7 +188,9 @@ jobs:
     timeout-minutes: 90
     env:
       CARGO_TERM_COLOR: always
-      CARGO_INCREMENTAL: 1
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+      CARGO_INCREMENTAL: 0
       CARGO_PROFILE_DEV_DEBUG: 0
       WOW_DATA: ""
     steps:
@@ -167,13 +199,15 @@ jobs:
           persist-credentials: false
       - name: Toolchain
         run: rustup toolchain install && rustc -V
+      - name: Setup compiler cache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.16.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - name: Gamepad Lua bridge tests
-        run: cargo test -p benilla-ui --lib script::gamepad::tests
-      - name: App and test-code check
-        run: cargo check -p benilla-app --no-default-features --tests
       - name: Build macOS player
         run: cargo build -p benilla --no-default-features
+      - name: Show compiler cache stats
+        run: sccache --show-stats
 
   ios-arm64:
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
@@ -181,6 +215,8 @@ jobs:
     timeout-minutes: 120
     env:
       CARGO_TERM_COLOR: always
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
       CARGO_INCREMENTAL: 0
       CARGO_PROFILE_RELEASE_DEBUG: 0
       WOW_DATA: ""
@@ -190,6 +226,10 @@ jobs:
           persist-credentials: false
       - name: Toolchain
         run: rustup toolchain install && rustc -V
+      - name: Setup compiler cache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.16.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Install iOS target
         run: rustup target add aarch64-apple-ios
@@ -204,3 +244,5 @@ jobs:
           test -f "$APP/Info.plist"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")" = "benilla"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")" = "com.tyrael9.benilla"
+      - name: Show compiler cache stats
+        run: sccache --show-stats

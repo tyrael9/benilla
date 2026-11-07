@@ -292,13 +292,26 @@ local function CreateControllerButton(
     controllerSlot
 )
 
-    local button =
-        CreateFrame(
+    -- The live 1.12 client supplies ActionButtonTemplate. The lightweight FrameXML
+    -- harness used by CI intentionally omits some stock templates, so keep the
+    -- controller's input/action-slot behavior testable with a plain CheckButton too.
+    local ok, button =
+        pcall(
+            CreateFrame,
             "CheckButton",
             "BenillaControllerButton" .. controllerSlot,
             BenillaControllerBar,
             "ActionButtonTemplate"
         )
+
+    if not ok then
+        button =
+            CreateFrame(
+                "CheckButton",
+                "BenillaControllerButton" .. controllerSlot,
+                BenillaControllerBar
+            )
+    end
 
     button.controllerSlot =
         controllerSlot

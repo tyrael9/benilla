@@ -986,24 +986,34 @@ fn end_dispatch(
     keys: Res<ButtonInput<KeyCode>>,
     buttons: Res<ButtonInput<MouseButton>>,
     mut latches: ResMut<BindingLatches>,
-    gamepad: Res<crate::gamepad::GamepadSnapshot>,
-    mut gamepad_bindings: ResMut<crate::gamepad::GamepadBindings>,
+    gamepad: Option<Res<crate::gamepad::GamepadSnapshot>>,
+    mut gamepad_bindings: Option<ResMut<crate::gamepad::GamepadBindings>>,
     dispatch: Res<BindingDispatch>,
     mut gamepad_vm: Local<crate::ui_script::VmMemo<bool>>,
 ) {
     vm.run(|mut script| {
-        let vm_changed = script
-            .as_deref_mut()
-            .is_some_and(|script| gamepad_vm.claim(script));
-        if vm_changed {
-            gamepad_bindings.reset_for_vm();
+        // The gamepad bridge is absent in small headless harnesses; keyboard and mouse
+        // bindings remain fully usable there.
+        if let (Some(gamepad), Some(gamepad_bindings)) =
+            (gamepad.as_deref(), gamepad_bindings.as_deref_mut())
+        {
+            let vm_changed = script
+                .as_deref_mut()
+                .is_some_and(|script| gamepad_vm.claim(script));
+            if vm_changed {
+                gamepad_bindings.reset_for_vm();
+            }
+            crate::gamepad::dispatch_action_bindings(
+                script.as_deref_mut(),
+                gamepad,
+                gamepad_bindings,
+            );
+            crate::gamepad::dispatch_utility_bindings(
+                script.as_deref_mut(),
+                gamepad,
+                &dispatch,
+            );
         }
-        crate::gamepad::dispatch_action_bindings(
-            script.as_deref_mut(),
-            &gamepad,
-            &mut gamepad_bindings,
-        );
-        crate::gamepad::dispatch_utility_bindings(script.as_deref_mut(), &gamepad, &dispatch);
         // ── The stuck-latch sweep ── a release the window never saw: a latch whose base key reads
         // up unlatches now and runs its up-half. The reference's two bulk clears land here too,
         // since bevy zeroes `ButtonInput` for both (see `begin_dispatch`). UI keyboard focus never

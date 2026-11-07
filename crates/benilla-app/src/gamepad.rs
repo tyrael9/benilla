@@ -1164,9 +1164,11 @@ mod tests {
             touch_stick_axes(Vec2::new(132.0, 199.0), Vec2::new(132.0, 136.0), 63.0),
             Vec2::Y
         );
-        let clamped =
-            touch_stick_axes(Vec2::new(195.0, 199.0), Vec2::new(132.0, 136.0), 63.0);
-        assert!((clamped.length() - 1.0).abs() < 1e-6, "radial clamp: {clamped:?}");
+        let clamped = touch_stick_axes(Vec2::new(195.0, 199.0), Vec2::new(132.0, 136.0), 63.0);
+        assert!(
+            (clamped.length() - 1.0).abs() < 1e-6,
+            "radial clamp: {clamped:?}"
+        );
     }
 
     #[test]

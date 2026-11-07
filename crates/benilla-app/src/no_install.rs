@@ -75,13 +75,17 @@ fn message(looked_in: &[PathBuf]) -> String {
 pub(crate) fn fail(err: &NoInstall, unattended: bool) -> AppExit {
     eprintln!("benilla: {}", err.message());
     if !unattended {
-        // Linux shows it through `zenity` and logs nothing when that is missing, which stderr covers.
-        rfd::MessageDialog::new()
-            .set_level(rfd::MessageLevel::Error)
-            .set_title(err.title)
-            .set_description(err.message())
-            .set_buttons(rfd::MessageButtons::Ok)
-            .show();
+        // iOS has no desktop dialog backend; stderr above remains available to the launcher.
+        #[cfg(not(target_os = "ios"))]
+        {
+            // Linux shows it through the XDG portal (or zenity fallback).
+            rfd::MessageDialog::new()
+                .set_level(rfd::MessageLevel::Error)
+                .set_title(err.title)
+                .set_description(err.message())
+                .set_buttons(rfd::MessageButtons::Ok)
+                .show();
+        }
     }
     AppExit::error()
 }

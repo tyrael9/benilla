@@ -183,8 +183,6 @@ mod tests {
             mouselook: false,
             turning: false,
             translating: false,
-            strafe_left: false,
-            strafe_right: false,
             turn_left: false,
             turn_right: false,
         }

@@ -852,7 +852,7 @@ fn gamepad_r3_target_nearest(
     let mode = r3_target_mode(state, in_combat);
     vm.run(|script| {
         if let Some(script) = script {
-            if let Err(error) = script.target_nearest(mode, false) {
+            if let Err(error) = script.target_nearest_with_range(mode, false, Some(41.0)) {
                 warn!("gamepad R3 target cycle: {error}");
             }
         }

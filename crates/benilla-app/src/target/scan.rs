@@ -29,8 +29,6 @@ use super::Selection;
 // == The Classic-priority dials ==
 // Each names the Classic Era cvar it stands in for; the values are tuned.
 
-/// The legacy controller's fixed nearest-target range, in yards.
-const TAB_RANGE: f32 = 41.0;
 /// `TargetPriorityFrustumPullInSides`: the viewport width fraction pulled in from each side.
 const FRUSTUM_PULL_SIDES: f32 = 0.10;
 /// `TargetPriorityFrustumPullInTop`: the viewport height fraction pulled down from the top.
@@ -244,8 +242,8 @@ pub(crate) struct TargetScan<'w, 's> {
     index: Option<Res<'w, GuidIndex>>,
     /// The party slots and raid roster modes 3 and 4 test; `Option` for the same harnesses.
     group: Option<Res<'w, crate::ui_party::GroupState>>,
-    /// `targetNearestDistance`, the default's in those harnesses.
-    _tab_range: Option<Res<'w, super::TabRange>>,
+    /// `targetNearestDistance`, 41 yards until the CVar is changed.
+    tab_range: Option<Res<'w, super::TabRange>>,
     /// GameObject faction/template and meeting-stone inputs; optional for UI-only scan harnesses.
     go_gate: Option<super::hover::GoGateInputs<'w>>,
 }
@@ -386,15 +384,21 @@ impl TargetScan<'_, '_> {
 
     /// Filter, project, score and sort every known unit, fresh each press.
     fn build(&self, side: ScanSide) -> Vec<Candidate> {
+        let range = self
+            .tab_range
+            .as_deref()
+            .map_or(super::TabRange::default().0, |r| r.0);
+        self.build_with_range(side, range)
+    }
+
+    /// The same candidate pool with an explicit engine-owned range, used by R3 to preserve its
+    /// legacy fixed 41-yard controller radius without changing the stock targetNearestDistance CVar.
+    fn build_with_range(&self, side: ScanSide, range: f32) -> Vec<Candidate> {
         let Ok((self_tf, _, self_guid)) = self.self_q.single() else {
             return Vec::new();
         };
         let me = self_guid.map(|g| g.0);
         let cam = self.camera.single().ok();
-        // The limit the collector squares (`0x494350`, `0x49435d`).
-        // Preserve the previous gamepad feel: the legacy R3/TAB pool used a fixed 41-yard radius,
-        // regardless of a saved targetNearestDistance override.
-        let range = TAB_RANGE;
         // Off-centerness on the pulled-in screen, 0 at the centre and about 1 at a corner, `None`
         // outside it. Callers project the root + 1 yd, so feet just below the edge still count.
         let project = |world: Vec3| -> Option<f32> {
@@ -923,6 +927,7 @@ pub(super) fn commit(
 pub(super) fn cycle(
     side: ScanSide,
     reverse: bool,
+    range_override: Option<f32>,
     now: f64,
     scan: &TargetScan,
     history: &mut TabHistory,
@@ -941,7 +946,10 @@ pub(super) fn cycle(
             history.visited.len()
         );
     }
-    let cands = scan.build(side);
+    let cands = match range_override {
+        Some(range) => scan.build_with_range(side, range),
+        None => scan.build(side),
+    };
     if cands.is_empty() {
         if trace {
             info!("tab-trace: no candidates — target unchanged");
@@ -1100,6 +1108,7 @@ impl AttackPick<'_, '_> {
             return cycle(
                 ScanSide::Enemy,
                 false,
+                None,
                 self.time.elapsed_secs_f64(),
                 &self.scan,
                 &mut self.history,

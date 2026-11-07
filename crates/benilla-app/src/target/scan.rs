@@ -9,8 +9,8 @@
 //! Kept from 1.12: the validity filters (`0x493e40`, `CanAttack 0x606980`, critters), the
 //! [`commit_owing`] through `SetSelection` (`0x493540`), the attack acquire (`0x612df0` at `0x6130b5`),
 //! the ATTACKERSTATEUPDATE and spell start acquires (`0x6259c9`–`0x6259fe`, `0x6e7963`-`0x6e799c`)
-//! and the legacy controller's fixed 41-yard candidate radius. The `targetNearestDistance`
-//! CVar is intentionally not used by this controller scan, preserving the prior R3/TAB feel.
+//! and the `targetNearestDistance` CVar's live value. The controller-owned R3 path supplies
+//! its legacy fixed 41-yard radius as an explicit scan override.
 
 use benilla_formats::CreatureTypeTable;
 use benilla_protocol::{guid, EntityKind};
@@ -2287,6 +2287,17 @@ mod tests {
         assert_eq!(pool(&mut world), [NEAR, FAR]);
         world.resource_mut::<super::super::TabRange>().0 = 20.0;
         assert_eq!(pool(&mut world), [NEAR]);
+
+        // R3 retains its legacy fixed range even when the stock target CVar is customized.
+        let controller_pool = world
+            .run_system_once(|scan: TargetScan| {
+                scan.build_with_range(ScanSide::Enemy, 41.0)
+                    .iter()
+                    .map(|c| c.guid)
+                    .collect::<Vec<_>>()
+            })
+            .expect("the controller scan runs as a one-shot system");
+        assert_eq!(controller_pool, [NEAR, FAR]);
     }
 
     #[test]

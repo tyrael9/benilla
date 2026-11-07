@@ -1206,18 +1206,39 @@ mod tests {
 
         #[cfg(not(target_os = "ios"))]
         {
+            // SDL snapshots store right_y positive-up; consumers use positive-down.
             assert_eq!(up.look_axis(), -Vec2::Y);
             assert_eq!(down.look_axis(), Vec2::Y);
+            assert_eq!(up.virtual_mouse_axis(), -Vec2::Y);
         }
 
         #[cfg(target_os = "ios")]
         {
+            // GameController snapshots already use the legacy positive-down convention.
             assert_eq!(up.look_axis(), Vec2::Y);
             assert_eq!(down.look_axis(), -Vec2::Y);
+            assert_eq!(up.virtual_mouse_axis(), Vec2::Y);
         }
 
-        // The virtual pointer always keeps its own UI-up convention.
-        assert_eq!(up.virtual_mouse_axis(), Vec2::Y);
+        // LT virtual mouse keeps raw magnitude above the threshold; camera look remaps it.
+        let half = GamepadSnapshot {
+            current: GamepadLuaState {
+                right_x: 0.5,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!((half.virtual_mouse_axis().x - 0.5).abs() < 1e-6);
+        assert!(half.look_axis().x < half.virtual_mouse_axis().x);
+
+        let below_deadzone = GamepadSnapshot {
+            current: GamepadLuaState {
+                right_x: 0.149,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(below_deadzone.virtual_mouse_axis(), Vec2::ZERO);
     }
 
     #[test]

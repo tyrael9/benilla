@@ -110,12 +110,24 @@ impl ScriptSelect<'_, '_> {
         mode: benilla_ui::script::NearestMode,
         reverse: bool,
     ) -> SelectDebt {
+        self.target_nearest_with_range(mode, reverse, None)
+    }
+
+    /// Controller-owned nearest targeting may pin its scan radius to the legacy gamepad value;
+    /// ordinary TargetNearest calls continue to use the user's targetNearestDistance CVar.
+    pub(crate) fn target_nearest_with_range(
+        &mut self,
+        mode: benilla_ui::script::NearestMode,
+        reverse: bool,
+        range_override: Option<f32>,
+    ) -> SelectDebt {
         let now = self.time.elapsed_secs_f64();
         let (scan, history, interact) = (&self.scan, &mut self.history, &mut self.interact);
         self.commit.owing(|commit| {
             let owed = scan::cycle(
                 scan::ScanSide::of(mode),
                 reverse,
+                range_override,
                 now,
                 scan,
                 history,

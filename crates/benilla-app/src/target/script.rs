@@ -111,23 +111,33 @@ impl ScriptSelect<'_, '_> {
         mode: benilla_ui::script::NearestMode,
         reverse: bool,
     ) -> SelectDebt {
-        self.target_nearest_with_visibility(mode, reverse, false)
+        self.target_nearest_with_options(mode, reverse, None, false)
     }
 
-    /// Controller R3 shares the user's `targetNearestDistance` CVar but only considers candidates
-    /// projected inside the camera viewport.
+    /// Controller R3 shares the user's live CVar range but only considers candidates projected
+    /// inside the camera viewport.
     pub(crate) fn target_nearest_in_view(
         &mut self,
         mode: benilla_ui::script::NearestMode,
         reverse: bool,
     ) -> SelectDebt {
-        self.target_nearest_with_visibility(mode, reverse, true)
+        self.target_nearest_with_options(mode, reverse, None, true)
     }
 
-    fn target_nearest_with_visibility(
+    pub(crate) fn target_nearest_with_range(
         &mut self,
         mode: benilla_ui::script::NearestMode,
         reverse: bool,
+        range_override: Option<f32>,
+    ) -> SelectDebt {
+        self.target_nearest_with_options(mode, reverse, range_override, false)
+    }
+
+    pub(crate) fn target_nearest_with_options(
+        &mut self,
+        mode: benilla_ui::script::NearestMode,
+        reverse: bool,
+        range_override: Option<f32>,
         require_in_view: bool,
     ) -> SelectDebt {
         let now = self.time.elapsed_secs_f64();
@@ -136,6 +146,7 @@ impl ScriptSelect<'_, '_> {
             let owed = scan::cycle(
                 scan::ScanSide::of(mode),
                 reverse,
+                range_override,
                 require_in_view,
                 now,
                 scan,

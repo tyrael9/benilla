@@ -382,13 +382,16 @@ impl TargetScan<'_, '_> {
         self.stores.get(entity).ok()
     }
 
+    /// The user's TAB distance, 41 yards until targetNearestDistance is changed.
+    fn configured_range(&self) -> f32 {
+        self.tab_range
+            .as_deref()
+            .map_or(super::TabRange::default().0, |r| r.0)
+    }
+
     /// Filter, project, score and sort every known unit, fresh each press.
     fn build(&self, side: ScanSide) -> Vec<Candidate> {
-        let range = self
-            .tab_range
-            .as_deref()
-            .map_or(super::TabRange::default().0, |r| r.0);
-        self.build_with_range(side, range)
+        self.build_with_range(side, self.configured_range())
     }
 
     /// The same candidate pool with an explicit engine-owned range, used by R3 to preserve its
@@ -486,7 +489,11 @@ impl TargetScan<'_, '_> {
             // tier.
             let dist = (tf.translation - self_tf.translation).length();
             if dist > range {
-                trace_unit(guid_c.0, tf, "REJECT range");
+                trace_unit(
+                    guid_c.0,
+                    tf,
+                    &format!("REJECT range (> {range:.1} yd)"),
+                );
                 continue;
             }
             let off_center = project(tf.translation + Vec3::Y);
@@ -939,17 +946,20 @@ pub(super) fn cycle(
     history.enter(side);
     history.prune(now);
     let trace = tab_trace_on();
+    let range = range_override.unwrap_or_else(|| scan.configured_range());
     if trace {
         info!(
-            "tab-trace: {side:?} press (reverse={reverse}), selection {:?}, history {}",
+            "tab-trace: {side:?} press (reverse={reverse}), range {range:.1} yd ({}), selection {:?}, history {}",
+            if range_override.is_some() {
+                "controller override"
+            } else {
+                "targetNearestDistance"
+            },
             selection.guid.map(|g| format!("{g:#x}")),
             history.visited.len()
         );
     }
-    let cands = match range_override {
-        Some(range) => scan.build_with_range(side, range),
-        None => scan.build(side),
-    };
+    let cands = scan.build_with_range(side, range);
     if cands.is_empty() {
         if trace {
             info!("tab-trace: no candidates — target unchanged");
@@ -2247,6 +2257,8 @@ mod tests {
 
         const NEAR: u64 = 0xA1;
         const FAR: u64 = 0xA2;
+        const EDGE: u64 = 0xA3;
+        const OUTSIDE: u64 = 0xA4;
         let mut world = World::new();
         world.init_resource::<Reputations>();
         world.init_resource::<NameCache>();
@@ -2262,7 +2274,12 @@ mod tests {
                 (F_MAXHEALTH, 100),
             ]),
         ));
-        for (guid, z) in [(NEAR, 15.0), (FAR, 30.0)] {
+        for (guid, z) in [
+            (NEAR, 15.0),
+            (FAR, 30.0),
+            (EDGE, 40.5),
+            (OUTSIDE, 41.5),
+        ] {
             world.spawn((
                 NetEntity {
                     kind: EntityKind::Unit,
@@ -2284,7 +2301,7 @@ mod tests {
                 })
                 .expect("the scan runs as a one-shot system")
         };
-        assert_eq!(pool(&mut world), [NEAR, FAR]);
+        assert_eq!(pool(&mut world), [NEAR, FAR, EDGE]);
         world.resource_mut::<super::super::TabRange>().0 = 20.0;
         assert_eq!(pool(&mut world), [NEAR]);
 
@@ -2297,7 +2314,11 @@ mod tests {
                     .collect::<Vec<_>>()
             })
             .expect("the controller scan runs as a one-shot system");
-        assert_eq!(controller_pool, [NEAR, FAR]);
+        assert_eq!(
+            controller_pool,
+            [NEAR, FAR, EDGE],
+            "41 yd includes 40.5 and rejects 41.5 even when the CVar is 20"
+        );
     }
 
     #[test]

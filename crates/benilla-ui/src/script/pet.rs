@@ -122,6 +122,10 @@ pub struct PetStats {
     pub training_points: (u16, u16),
     /// `GetPetExperience`: `(currXP, nextXP)`.
     pub experience: (u32, u32),
+    /// The family word paired with `GetPetIcon()`. The stable's live-pet branch concatenates
+    /// `UnitCreatureFamily("pet")` whenever this icon exists; keep the word with the icon so it
+    /// survives the packet-order gap between `SMSG_PET_SPELLS` and the player's pet-guid fields.
+    pub family: Option<String>,
     /// `GetPetIcon()`: the family row's `CreatureFamily.dbc` icon, `None` on the family word's
     /// misses. Ungated like the family word; whether the reference gates it (`0x4beb10`) is
     /// untraced, and no warlock reaches its stock callers (`PetStable.lua:51`, `161-162`).
@@ -698,7 +702,18 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
             let token =
                 binding_abi::string_arg(lua, token, r#"Usage: UnitCreatureFamily("unit")"#)?;
             super::unit::check_unit_token(&Some(token.clone()))?;
-            let family = super::unit::read_identity(lua, &token, |_, id| id.family()).flatten();
+            let family = super::unit::read_identity(lua, &token, |_, id| id.family())
+                .flatten()
+                // The bar's pet guid is written by SMSG_PET_SPELLS; the "pet" token follows
+                // UNIT_FIELD_CHARM/SUMMON. The former can lead the latter by one packet, while
+                // PetStable.lua has already observed GetPetIcon() and now concatenates this word.
+                // Keep the two answers paired only for "pet"; other unresolved units remain nil.
+                .or_else(|| {
+                    token
+                        .eq_ignore_ascii_case("pet")
+                        .then(|| stats_now(lua).1.family)
+                        .flatten()
+                });
             Ok(match family.as_deref() {
                 Some(name) => Value::String(lua.create_string(name)?),
                 None => Value::Nil,
@@ -1462,6 +1477,28 @@ mod tests {
                 "{token}"
             );
         }
+        // The pet-bar packet can arrive before UNIT_FIELD_SUMMON updates the "pet" token. In
+        // that interval the icon and family must still agree, or PetStable.lua concatenates nil.
+        s.set_unit("pet", None);
+        s.set_pet_stats(
+            true,
+            PetStats {
+                family: Some("Boar".into()),
+                icon: Some(r"Interface\Icons\Ability_Hunter_Pet_Boar".into()),
+                ..PetStats::default()
+            },
+        );
+        assert_eq!(
+            s.eval::<String>(r#"return UnitCreatureFamily("pet")"#).unwrap(),
+            "Boar"
+        );
+        assert!(s
+            .eval::<bool>(r#"return GetPetIcon() ~= nil"#)
+            .unwrap());
+        assert!(s
+            .eval::<bool>(r#"return UnitCreatureFamily("target") == nil"#)
+            .unwrap());
+
         assert!(s
             .eval::<bool>(r#"return UnitCreatureFamily("player") == nil"#)
             .unwrap());

@@ -685,16 +685,13 @@ pub(crate) fn gamepad_slot(button: GamepadButton, modifier: u8) -> &'static str 
 
 /// Runs the controller action-bar commands inside the normal binding pass. This keeps
 /// BindingInput calls in the same frame and captures the L/R layer at button-down time.
-pub(crate) fn dispatch_action_bindings(
-    script: Option<&mut UiScript>,
+fn gamepad_binding_events(
     snapshot: &GamepadSnapshot,
     bindings: &mut GamepadBindings,
-) {
-    let Some(script) = script else {
-        return;
-    };
+) -> Vec<(&'static str, bool)> {
     let now = snapshot.current;
     let was = snapshot.previous;
+    let mut events = Vec::new();
 
     if now.l != was.l || now.r != was.r || !bindings.modifier_initialized {
         let command = if now.l {
@@ -704,9 +701,7 @@ pub(crate) fn dispatch_action_bindings(
         } else {
             "GAMEPAD_MODIFIER_CLEAR"
         };
-        if let Err(error) = script.execute_binding(command, true) {
-            warn!("gamepad binding {command}: {error}");
-        }
+        events.push((command, true));
         bindings.modifier_initialized = true;
     }
 
@@ -741,9 +736,7 @@ pub(crate) fn dispatch_action_bindings(
                 .position(|(held, _)| *held == button)
             {
                 let (_, command) = bindings.latched.remove(index);
-                if let Err(error) = script.execute_binding(command, false) {
-                    warn!("gamepad binding {command} release: {error}");
-                }
+                events.push((command, false));
             }
             continue;
         }
@@ -751,9 +744,7 @@ pub(crate) fn dispatch_action_bindings(
         if pressed && !was_pressed {
             let command = gamepad_slot(button, modifier);
             if !bindings.latched.iter().any(|(held, _)| *held == button) {
-                if let Err(error) = script.execute_binding(command, true) {
-                    warn!("gamepad binding {command}: {error}");
-                }
+                events.push((command, true));
                 bindings.latched.push((button, command));
             }
         } else if !pressed && was_pressed {
@@ -763,10 +754,28 @@ pub(crate) fn dispatch_action_bindings(
                 .position(|(held, _)| *held == button)
             {
                 let (_, command) = bindings.latched.remove(index);
-                if let Err(error) = script.execute_binding(command, false) {
-                    warn!("gamepad binding {command} release: {error}");
-                }
+                events.push((command, false));
             }
+        }
+    }
+
+    events
+}
+
+/// Runs the controller action-bar commands inside the normal binding pass. This keeps
+/// BindingInput calls in the same frame and captures the L/R layer at button-down time.
+pub(crate) fn dispatch_action_bindings(
+    script: Option<&mut UiScript>,
+    snapshot: &GamepadSnapshot,
+    bindings: &mut GamepadBindings,
+) {
+    let Some(script) = script else {
+        return;
+    };
+
+    for (command, pressed) in gamepad_binding_events(snapshot, bindings) {
+        if let Err(error) = script.execute_binding(command, pressed) {
+            warn!("gamepad binding {command}: {error}");
         }
     }
 }
@@ -1223,6 +1232,71 @@ mod tests {
                 format!("GAMEPAD_SLOT_{:02}", index + 17)
             );
         }
+    }
+
+    #[test]
+    fn action_binding_release_uses_the_modifier_latched_at_press_time() {
+        let mut bindings = GamepadBindings::default();
+        let mut snapshot = GamepadSnapshot {
+            current: GamepadLuaState {
+                connected: true,
+                a: true,
+                l: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        assert_eq!(
+            gamepad_binding_events(&snapshot, &mut bindings),
+            [("GAMEPAD_MODIFIER_L", true), ("GAMEPAD_SLOT_09", true)]
+        );
+
+        snapshot.previous = snapshot.current;
+        snapshot.current = GamepadLuaState {
+            connected: true,
+            a: false,
+            r: true,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            gamepad_binding_events(&snapshot, &mut bindings),
+            [("GAMEPAD_MODIFIER_R", true), ("GAMEPAD_SLOT_09", false)],
+            "releasing A must release the L-layer command that was pressed, not the current R layer"
+        );
+    }
+
+    #[test]
+    fn left_trigger_releases_a_latched_face_button_without_restarting_it() {
+        let mut bindings = GamepadBindings::default();
+        let mut snapshot = GamepadSnapshot {
+            current: GamepadLuaState {
+                connected: true,
+                a: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            gamepad_binding_events(&snapshot, &mut bindings),
+            [("GAMEPAD_MODIFIER_CLEAR", true), ("GAMEPAD_SLOT_01", true)]
+        );
+
+        snapshot.previous = snapshot.current;
+        snapshot.current.zl = 1.0;
+        assert_eq!(
+            gamepad_binding_events(&snapshot, &mut bindings),
+            [("GAMEPAD_SLOT_01", false)],
+            "LT takes ownership from an action already held"
+        );
+
+        snapshot.previous = snapshot.current;
+        snapshot.current.a = false;
+        assert!(
+            gamepad_binding_events(&snapshot, &mut bindings).is_empty(),
+            "the already-released latch must not emit a duplicate up edge"
+        );
     }
 
     #[test]

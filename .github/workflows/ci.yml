@@ -50,7 +50,7 @@ jobs:
         run: cargo check -p benilla-app --no-default-features --tests
 
   full-linux:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.number == 4)
     runs-on: ubuntu-latest
     timeout-minutes: 150
     env:
@@ -96,7 +96,7 @@ jobs:
         run: cargo test -p benilla-formats -p benilla-app --no-default-features --lib
 
   full-windows:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.number == 4)
     runs-on: windows-latest
     timeout-minutes: 180
     env:
@@ -126,3 +126,33 @@ jobs:
           $reserve = [BitConverter]::ToUInt64($b, $pe + 24 + 72)
           "SizeOfStackReserve: $reserve"
           if ($reserve -lt 8MB) { exit 1 }
+
+  ios-arm64:
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    timeout-minutes: 120
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: 0
+      CARGO_PROFILE_RELEASE_DEBUG: 0
+      WOW_DATA: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain
+        run: rustup toolchain install && rustc -V
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Install iOS target
+        run: rustup target add aarch64-apple-ios
+      - name: Validate iOS app metadata
+        run: plutil -lint ios/Info.plist
+      - name: Build and package unsigned iOS app
+        run: IOS_UNSIGNED=1 PROFILE=release scripts/ios-package.sh
+      - name: Verify packaged app
+        run: |
+          APP="target/aarch64-apple-ios/release/Benilla.app"
+          test -x "$APP/benilla"
+          test -f "$APP/Info.plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")" = "benilla"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")" = "com.tyrael9.benilla"

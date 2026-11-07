@@ -30,6 +30,8 @@ use super::Selection;
 // Each names the Classic Era cvar it stands in for; the values are tuned.
 
 /// `TargetPriorityFrustumPullInSides`: the viewport width fraction pulled in from each side.
+// The original controller's TAB candidate radius was fixed at 41 yards.
+const TAB_RANGE: f32 = 41.0;
 const FRUSTUM_PULL_SIDES: f32 = 0.10;
 /// `TargetPriorityFrustumPullInTop`: the viewport height fraction pulled down from the top.
 const FRUSTUM_PULL_TOP: f32 = 0.10;
@@ -243,7 +245,7 @@ pub(crate) struct TargetScan<'w, 's> {
     /// The party slots and raid roster modes 3 and 4 test; `Option` for the same harnesses.
     group: Option<Res<'w, crate::ui_party::GroupState>>,
     /// `targetNearestDistance`, the default's in those harnesses.
-    tab_range: Option<Res<'w, super::TabRange>>,
+    _tab_range: Option<Res<'w, super::TabRange>>,
     /// GameObject faction/template and meeting-stone inputs; optional for UI-only scan harnesses.
     go_gate: Option<super::hover::GoGateInputs<'w>>,
 }
@@ -390,10 +392,9 @@ impl TargetScan<'_, '_> {
         let me = self_guid.map(|g| g.0);
         let cam = self.camera.single().ok();
         // The limit the collector squares (`0x494350`, `0x49435d`).
-        let range = self
-            .tab_range
-            .as_deref()
-            .map_or(super::TabRange::default().0, |r| r.0);
+        // Preserve the previous gamepad feel: the legacy R3/TAB pool used a fixed 41-yard radius,
+        // regardless of a saved targetNearestDistance override.
+        let range = TAB_RANGE;
         // Off-centerness on the pulled-in screen, 0 at the centre and about 1 at a corner, `None`
         // outside it. Callers project the root + 1 yd, so feet just below the edge still count.
         let project = |world: Vec3| -> Option<f32> {

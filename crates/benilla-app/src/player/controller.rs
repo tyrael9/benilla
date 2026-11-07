@@ -4,6 +4,7 @@
 //! posture commit before the pose, the ack after the launch).
 
 use super::*;
+use crate::player::state::MOUSELOOK_PITCH_CLAMP;
 
 #[cfg(test)]
 mod tests;

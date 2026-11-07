@@ -25,6 +25,7 @@ use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::input::mouse::{
     AccumulatedMouseMotion, AccumulatedMouseScroll, MouseButtonInput, MouseMotion, MouseWheel,
 };
+use bevy::input::touch::TouchInput;
 use bevy::math::DVec2;
 use bevy::prelude::*;
 use bevy::window::{CursorLeft, CursorMoved, PrimaryWindow, WindowEvent};
@@ -89,6 +90,8 @@ struct RawInput<'w> {
     motion: ResMut<'w, Messages<MouseMotion>>,
     wheel: ResMut<'w, Messages<MouseWheel>>,
     moved: ResMut<'w, Messages<CursorMoved>>,
+    /// Finger input is player input too; do not let a gesture pass through the loading cover.
+    touch: ResMut<'w, Messages<TouchInput>>,
     /// The window's stream, the input records' source (`crate::ui_script::InputRecords`).
     window: Option<ResMut<'w, Messages<WindowEvent>>>,
 }
@@ -100,6 +103,7 @@ impl RawInput<'_> {
         self.motion.clear();
         self.wheel.clear();
         self.moved.clear();
+        self.touch.clear();
         if let Some(window) = self.window.as_mut() {
             window.clear();
         }

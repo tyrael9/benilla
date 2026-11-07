@@ -85,14 +85,27 @@ pub(super) fn update_pick_occlusion(
     window: Query<&Window, With<PrimaryWindow>>,
     trace: OcclusionTrace,
     probe: Res<super::hover_probe::ProbeAim>,
+    virtual_mouse: Option<Res<crate::gamepad::GamepadVirtualMouse>>,
+    gamepad_state: Option<Res<crate::gamepad::GamepadSnapshot>>,
     mut occlusion: ResMut<PickOcclusion>,
 ) {
     *occlusion = PickOcclusion::default();
     let Ok(window) = window.single() else {
         return;
     };
-    // A cursorless window traces from the hover probe's aim, as the picks do.
-    let Some(cursor) = window.cursor_position().or_else(|| probe.now()) else {
+    // Match both hover pickers: touch owns the pointer first, then LT's virtual mouse, then the
+    // physical mouse. The cursorless hover probe is the final fallback.
+    let cursor = gamepad_state
+        .as_deref()
+        .and_then(|state| state.touch_world_pointer)
+        .or_else(|| {
+            virtual_mouse
+                .as_deref()
+                .and_then(|mouse| mouse.window_position)
+        })
+        .or_else(|| window.cursor_position())
+        .or_else(|| probe.now());
+    let Some(cursor) = cursor else {
         return;
     };
     let Some(ray) = cursor_ray(&camera, cursor) else {

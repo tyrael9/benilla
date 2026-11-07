@@ -18,7 +18,7 @@ permissions:
 
 # A newer push to the same PR replaces the stale compile instead of queuing another.
 concurrency:
-  group: macos-compile-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:

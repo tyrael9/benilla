@@ -1175,7 +1175,7 @@ mod tests {
     }
 
     #[test]
-    fn camera_look_uses_the_legacy_down_positive_pitch_axis() {
+    fn camera_look_preserves_the_platforms_legacy_y_convention() {
         let up = GamepadSnapshot {
             current: GamepadLuaState {
                 right_y: 1.0,
@@ -1191,9 +1191,19 @@ mod tests {
             ..Default::default()
         };
 
-        assert_eq!(up.look_axis(), -Vec2::Y);
-        assert_eq!(down.look_axis(), Vec2::Y);
-        // The virtual pointer keeps its own UI-up convention.
+        #[cfg(not(target_os = "ios"))]
+        {
+            assert_eq!(up.look_axis(), -Vec2::Y);
+            assert_eq!(down.look_axis(), Vec2::Y);
+        }
+
+        #[cfg(target_os = "ios")]
+        {
+            assert_eq!(up.look_axis(), Vec2::Y);
+            assert_eq!(down.look_axis(), -Vec2::Y);
+        }
+
+        // The virtual pointer always keeps its own UI-up convention.
         assert_eq!(up.virtual_mouse_axis(), Vec2::Y);
     }
 

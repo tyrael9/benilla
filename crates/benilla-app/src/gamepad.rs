@@ -39,11 +39,20 @@ impl GamepadSnapshot {
             return Vec2::ZERO;
         }
 
-        // right_y is stored positive-up for the virtual pointer (UI coordinates). The legacy
-        // camera path consumes positive-down, as the original SDL GamepadState did. Flip only
-        // the camera view here; virtual_mouse_axis() remains unchanged.
         let axis = self.virtual_mouse_axis();
-        Vec2::new(axis.x, -axis.y)
+
+        #[cfg(not(target_os = "ios"))]
+        {
+            // SDL snapshots use a unified positive-up right_y for the virtual pointer, while the
+            // legacy SDL camera path consumed positive-down. Flip only the camera view.
+            Vec2::new(axis.x, -axis.y)
+        }
+
+        #[cfg(target_os = "ios")]
+        {
+            // GameController's legacy path already used positive-up for camera look.
+            axis
+        }
     }
 
     pub(crate) fn virtual_mouse_axis(&self) -> Vec2 {

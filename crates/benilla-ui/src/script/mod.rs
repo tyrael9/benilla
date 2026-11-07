@@ -1129,16 +1129,35 @@ impl UiScript {
     /// Run one nearest-target cycle from an engine-owned input such as the controller's R3 press.
     /// The caller must lend the script-call host (for example through `VmWith::run`).
     pub fn target_nearest(&self, mode: NearestMode, reverse: bool) -> mlua::Result<()> {
-        self.target_nearest_with_range(mode, reverse, None)
+        self.target_nearest_with_options(mode, reverse, None, false)
     }
 
-    /// Run a nearest-target cycle with an optional engine-owned range override. The gamepad uses
-    /// 41 yards to preserve its legacy R3 behavior; stock targeting keeps the CVar.
+    /// Run a nearest-target cycle with the user's live CVar range, restricted to the camera view.
+    /// Controller R3 uses this so off-screen and behind-camera candidates cannot be selected.
+    pub fn target_nearest_in_view(
+        &self,
+        mode: NearestMode,
+        reverse: bool,
+    ) -> mlua::Result<()> {
+        self.target_nearest_with_options(mode, reverse, None, true)
+    }
+
+    /// Run a nearest-target cycle with an optional engine-owned range override.
     pub fn target_nearest_with_range(
         &self,
         mode: NearestMode,
         reverse: bool,
         range_override: Option<f32>,
+    ) -> mlua::Result<()> {
+        self.target_nearest_with_options(mode, reverse, range_override, false)
+    }
+
+    fn target_nearest_with_options(
+        &self,
+        mode: NearestMode,
+        reverse: bool,
+        range_override: Option<f32>,
+        require_in_view: bool,
     ) -> mlua::Result<()> {
         calls::submit(
             &self.lua,
@@ -1146,6 +1165,7 @@ impl UiScript {
                 mode,
                 reverse,
                 range_override,
+                require_in_view,
                 may_cast: true,
             },
         )

@@ -321,7 +321,7 @@ fn update_virtual_cursor_overlay(
     let Ok(window) = window.single() else {
         return;
     };
-    let Some(assets) = world_assets else {
+    let Some(mut assets) = world_assets else {
         return;
     };
 
@@ -345,7 +345,7 @@ fn update_virtual_cursor_overlay(
         virtual_cursor_texture(
             &displayed.0.stem(),
             &mut textures,
-            &mut *assets.into_inner(),
+            &mut *assets,
             &mut images,
         )
     };

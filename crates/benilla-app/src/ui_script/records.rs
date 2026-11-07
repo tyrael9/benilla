@@ -433,7 +433,7 @@ mod tests {
                     record: Record::Button {
                         button: MouseButton::Left,
                         state: ButtonState::Pressed,
-                },
+                    },
                     mods: Default::default(),
                     at: Some(Vec2::ONE),
                 },
@@ -443,9 +443,9 @@ mod tests {
 
         records.inject_gamepad_pointer(
             vec![InputRecord {
-                    record: Record::Move,
-                    mods: Default::default(),
-                    at: Some(Vec2::splat(2.0)),
+                record: Record::Move,
+                mods: Default::default(),
+                at: Some(Vec2::splat(2.0)),
             }],
             true,
             false,
@@ -456,7 +456,6 @@ mod tests {
         assert!(matches!(records.records[1].record, Record::Move));
         assert_eq!(records.records[1].at, Some(Vec2::splat(2.0)));
     }
-
     #[test]
     fn gamepad_pointer_releases_are_prepended_before_window_events() {
         let mut records = InputRecords::default();

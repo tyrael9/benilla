@@ -990,6 +990,7 @@ pub(super) fn commit(
 pub(super) fn cycle(
     side: ScanSide,
     reverse: bool,
+    range_override: Option<f32>,
     require_in_view: bool,
     now: f64,
     scan: &TargetScan,
@@ -1002,7 +1003,7 @@ pub(super) fn cycle(
     history.enter(side);
     history.prune(now);
     let trace = tab_trace_on();
-    let range = scan.configured_range();
+    let range = range_override.unwrap_or_else(|| scan.configured_range());
     if trace {
         info!(
             "tab-trace: {side:?} press (reverse={reverse}), range {range:.1} yd (targetNearestDistance), selection {:?}, history {}",

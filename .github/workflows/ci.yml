@@ -151,6 +151,30 @@ jobs:
           "SizeOfStackReserve: $reserve"
           if ($reserve -lt 8MB) { exit 1 }
 
+  # Build and exercise the native macOS SDL3 gamepad path on the host platform.
+  macos-fast:
+    if: github.event_name == 'pull_request'
+    runs-on: macos-latest
+    timeout-minutes: 90
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: 1
+      CARGO_PROFILE_DEV_DEBUG: 0
+      WOW_DATA: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain
+        run: rustup toolchain install && rustc -V
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Gamepad Lua bridge tests
+        run: cargo test -p benilla-ui --lib script::gamepad::tests
+      - name: App and test-code check
+        run: cargo check -p benilla-app --no-default-features --tests
+      - name: Build macOS player
+        run: cargo build -p benilla --no-default-features
+
   ios-arm64:
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: macos-latest

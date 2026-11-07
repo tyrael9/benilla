@@ -109,7 +109,7 @@ fn inject_touch_input(
     mut events: MessageReader<bevy::input::touch::TouchInput>,
     mut records: ResMut<crate::ui_script::InputRecords>,
     mut snapshot: ResMut<GamepadSnapshot>,
-    mut state: Local<TouchGestureState>,
+    mut state: Local<crate::ui_script::VmMemo<TouchGestureState>>,
     window: Query<&Window, With<bevy::window::PrimaryWindow>>,
     widescreen: Option<Res<crate::video::Widescreen>>,
     time: Res<Time>,
@@ -123,6 +123,7 @@ fn inject_touch_input(
     const WORLD_LONG_PRESS_SECS: f32 = 1.0;
     const UI_LONG_PRESS_SECS: f32 = 3.0;
 
+    let state = state.get_for(script.as_deref());
     let Ok(window) = window.single() else {
         return;
     };
@@ -898,23 +899,30 @@ impl Plugin for GamepadBridgePlugin {
             .add_systems(
                 Update,
                 inject_touch_input
+                    .in_set(crate::ui_script::UiInput)
                     .after(poll_platform_gamepad)
                     .after(update_gamepad_virtual_mouse)
                     .after(crate::ui_script::collect_input_records)
                     .before(crate::ui_script::UiInputViews),
             )
+            // R3's combat-mode decision reads the player's final packet-updated flags.
             .add_systems(
                 Update,
-                (gamepad_r3_target_nearest, gamepad_rt_interact)
-                    .chain()
+                gamepad_r3_target_nearest
+                    .in_set(crate::ui_script::UiFeed)
+                    .after(poll_platform_gamepad),
+            )
+            .add_systems(
+                Update,
+                gamepad_rt_interact
                     .after(poll_platform_gamepad)
                     .before(crate::ui_script::UiInput),
             )
             .add_systems(
                 Update,
                 publish_gamepad_snapshot
-                    .after(inject_touch_input)
-                    .before(crate::ui_script::UiTick),
+                    .in_set(crate::ui_script::UiFeed)
+                    .after(inject_touch_input),
             );
     }
 }
@@ -1055,11 +1063,15 @@ fn poll_platform_gamepad(mut snapshot: ResMut<GamepadSnapshot>) {
     snapshot.current = state;
 }
 
-fn publish_gamepad_snapshot(snapshot: Res<GamepadSnapshot>, script: Option<NonSendMut<UiScript>>) {
-    let Some(mut script) = script else {
-        return;
-    };
-    script.set_gamepad_state(snapshot.current);
+fn publish_gamepad_snapshot(
+    snapshot: Res<GamepadSnapshot>,
+    mut vm: crate::script_calls::VmWith<()>,
+) {
+    vm.run(|script| {
+        if let Some(script) = script {
+            script.set_gamepad_state(snapshot.current);
+        }
+    });
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -1153,10 +1165,9 @@ mod tests {
             touch_stick_axes(Vec2::new(132.0, 199.0), Vec2::new(132.0, 136.0), 63.0),
             Vec2::Y
         );
-        assert_eq!(
-            touch_stick_axes(Vec2::new(195.0, 199.0), Vec2::new(132.0, 136.0), 63.0).length(),
-            1.0
-        );
+        let clamped =
+            touch_stick_axes(Vec2::new(195.0, 199.0), Vec2::new(132.0, 136.0), 63.0);
+        assert!((clamped.length() - 1.0).abs() < 1e-6, "radial clamp: {clamped:?}");
     }
 
     #[test]
@@ -1301,9 +1312,8 @@ mod tests {
 
     #[test]
     fn app_snapshot_is_published_to_lua() {
-        let mut app = App::new();
-        app.insert_non_send_resource(UiScript::new().expect("in-game script"));
-        app.insert_resource(GamepadSnapshot {
+        let script = UiScript::new().expect("in-game script");
+        let snapshot = GamepadSnapshot {
             current: GamepadLuaState {
                 connected: true,
                 a: true,
@@ -1311,13 +1321,8 @@ mod tests {
                 ..Default::default()
             },
             ..Default::default()
-        });
-
-        app.world_mut()
-            .run_system_once(publish_gamepad_snapshot)
-            .expect("publish controller snapshot");
-
-        let script = app.world().non_send_resource::<UiScript>();
+        };
+        script.set_gamepad_state(snapshot.current);
         let connected: bool = script.eval("Gamepad_IsConnected()").unwrap();
         let a_down: bool = script.eval("Gamepad_IsButtonDown('A')").unwrap();
         let left_x: f32 = script.eval("Gamepad_GetAxis('LeftX')").unwrap();

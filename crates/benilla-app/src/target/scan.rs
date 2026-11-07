@@ -9,8 +9,8 @@
 //! Kept from 1.12: the validity filters (`0x493e40`, `CanAttack 0x606980`, critters), the
 //! [`commit_owing`] through `SetSelection` (`0x493540`), the attack acquire (`0x612df0` at `0x6130b5`),
 //! the ATTACKERSTATEUPDATE and spell start acquires (`0x6259c9`–`0x6259fe`, `0x6e7963`-`0x6e799c`)
-//! and the range, `targetNearestDistance`'s value ([`super::TabRange`], `0x49435d`). The radius
-//! behind the cone, `targetNearestDistanceRadius`, has no counterpart.
+//! and the legacy controller's fixed 41-yard candidate radius. The `targetNearestDistance`
+//! CVar is intentionally not used by this controller scan, preserving the prior R3/TAB feel.
 
 use benilla_formats::CreatureTypeTable;
 use benilla_protocol::{guid, EntityKind};
@@ -29,9 +29,9 @@ use super::Selection;
 // == The Classic-priority dials ==
 // Each names the Classic Era cvar it stands in for; the values are tuned.
 
-/// `TargetPriorityFrustumPullInSides`: the viewport width fraction pulled in from each side.
-// The original controller's TAB candidate radius was fixed at 41 yards.
+/// The legacy controller's fixed nearest-target range, in yards.
 const TAB_RANGE: f32 = 41.0;
+/// `TargetPriorityFrustumPullInSides`: the viewport width fraction pulled in from each side.
 const FRUSTUM_PULL_SIDES: f32 = 0.10;
 /// `TargetPriorityFrustumPullInTop`: the viewport height fraction pulled down from the top.
 const FRUSTUM_PULL_TOP: f32 = 0.10;

@@ -2,7 +2,8 @@
 //!
 //! Deviation: TAB uses Classic Era's screen-space priority, not 1.12's ±30° facing cone and
 //! snapshot cursor (`0x493f60`), because the cone skips a close mob in front of the camera, which
-//! sits behind the character. On-screen candidates come first, the lowest score wins, and each
+//! sits behind the character. The pulled-in viewport candidates come first; stock TAB keeps its
+//! off-screen fallback, while controller R3 is restricted to the actual camera viewport. Each
 //! press skips recently tabbed guids; a fighting-me bonus, not Classic's hard combat lock, ranks
 //! attackers first without pinning TAB to them.
 //!
@@ -99,7 +100,8 @@ struct Candidate {
     friend_priority: u8,
 }
 
-/// Off-centerness (none off-screen) plus normalized distance, minus the fighting-me bonus.
+/// Off-centerness (none outside the pulled-in priority region) plus normalized distance, minus
+/// the fighting-me bonus.
 fn priority_score(off_center: Option<f32>, dist: f32, range: f32, combat_with_me: bool) -> f32 {
     off_center.map_or(0.0, |c| W_SCREEN * c) + W_DIST * (dist / range)
         - if combat_with_me {
@@ -526,9 +528,9 @@ impl TargetScan<'_, '_> {
                     }
                 }
             }
-            // Deviation: no drawn gate (the reference's IsEntityDrawn, `0x6704c0`), because the
-            // draw election hides every body outside the frustum, which would empty the off-screen
-            // tier.
+            // Stock TargetNearest deviation: no IsEntityDrawn gate (`0x6704c0`), retaining its
+            // off-screen fallback. Controller R3 adds a stricter actual-viewport gate after
+            // projection below.
             let dist = (tf.translation - self_tf.translation).length();
             if dist > range {
                 trace_unit(
@@ -2005,6 +2007,7 @@ mod tests {
 
         // The usual visible-target tier still outranks a party member outside the viewport.
         let mut offscreen_party = party;
+        offscreen_party.in_view = false;
         offscreen_party.on_screen = false;
         let mut visible_raid = other_subgroup;
         visible_raid.score = 100.0;

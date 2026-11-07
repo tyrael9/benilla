@@ -308,7 +308,6 @@ fn update_virtual_cursor_overlay(
     displayed: Res<DisplayedCursor>,
     mut quads: ResMut<crate::ui_pass::UiQuads>,
     window: Query<&Window, With<bevy::window::PrimaryWindow>>,
-    ui_scale: Res<crate::ui_script::UiScaleCvar>,
     mut textures: ResMut<VirtualCursorTextures>,
     world_assets: Option<ResMut<benilla_assets::WorldAssets>>,
     mut images: ResMut<Assets<Image>>,
@@ -353,7 +352,7 @@ fn update_virtual_cursor_overlay(
     let Some(texture) = texture else {
         return;
     };
-    let scale = crate::ui_script::seam_scale(window.height(), ui_scale.0);
+    let scale = crate::ui_script::seam_scale(window.height());
     let pos = Vec2::new(
         mouse.position_ui.x * scale,
         window.height() - mouse.position_ui.y * scale,

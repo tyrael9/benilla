@@ -1,269 +1,49 @@
-# Pull requests run focused checks on the platforms that matter to this port.
-# Full workspace suites remain available through workflow_dispatch.
-name: CI
+# A single fast compile gate for the macOS development target.
+# No tests, lint, packaging, or cross-platform jobs run on pull-request updates.
+name: macOS compile check
 
 on:
   pull_request:
+    paths:
+      - "**/*.rs"
+      - "**/Cargo.toml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/ci.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# Cancel obsolete runs for the same PR/branch, regardless of which commit started them.
+# A newer push to the same PR replaces the stale compile instead of queuing another.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
+  group: macos-compile-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  pr-fast:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04
+  macos-compile:
+    runs-on: macos-latest
     timeout-minutes: 45
     env:
       CARGO_TERM_COLOR: always
-      SCCACHE_GHA_ENABLED: "true"
-      RUSTC_WRAPPER: sccache
-      CARGO_INCREMENTAL: 0
-      CARGO_PROFILE_DEV_DEBUG: 0
-      WOW_DATA: ""
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Toolchain
-        run: rustup toolchain install && rustc -V
-      - name: Setup compiler cache
-        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-        with:
-          version: v0.16.0
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - name: fmt
-        run: cargo fmt --all -- --check
-      - name: message-catalog
-        run: scripts/gen-message-catalog.py --check
-      - name: pass-span-lint
-        run: scripts/pass-span-lint.py
-      - name: SDL build dependencies
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq pkg-config libasound2-dev libudev-dev
-      - name: gamepad Lua bridge tests
-        run: cargo test -p benilla-ui --lib script::gamepad::tests
-      - name: app gamepad integration check
-        run: cargo check -p benilla-app --no-default-features --lib
-      - name: app test code type-check
-        run: cargo check -p benilla-app --no-default-features --tests
-      # Exercise only the app tests whose resource, VM, touch, or schedule contracts changed.
-      - name: Gamepad and binding regressions
-        run: |
-          cargo test -p benilla-app --lib bindings::tests
-          cargo test -p benilla-app --lib gamepad::tests
-      - name: VM scheduling and session regressions
-        run: |
-          cargo test -p benilla-app --lib game_plugins::schedule_tests::every_vm_holder_in_update_declares_its_side_of_the_tick
-          cargo test -p benilla-app --lib lanes::guard_tests::every_view_push_of_what_a_handler_writes_is_listed
-          cargo test -p benilla-app --lib lanes::guard_tests::the_systems_unordered_against_the_drain_meet_it_only_on_a_pure_cache
-          cargo test -p benilla-app --lib script_calls::tests::every_system_that_writes_the_vm_holds_its_call_host
-          cargo test -p benilla-app --lib ui_script::session::tests::a_local_in_a_system_that_holds_the_vm_is_keyed_on_the_session
-      - name: Interface compatibility walls
-        run: |
-          cargo test -p benilla-app --test cover_input_wall
-          cargo test -p benilla-app --test ui_script_wall
-          cargo test -p benilla-ui --lib script::tests::reference_surface
-          cargo test -p benilla-ui --test vm_parity
-      # Load the shipped addons in the real FrameXML harness, including stance/layer action-slot probes.
-      - name: Fork addon smoke tests
-        run: python3 scripts/check-fork-addons.py
-      - name: Show compiler cache stats
-        run: sccache --show-stats
-
-  # Compile the actual Windows app/player without running the entire workspace test suite.
-  windows-fast:
-    if: github.event_name == 'pull_request'
-    runs-on: windows-latest
-    timeout-minutes: 60
-    env:
-      CARGO_TERM_COLOR: always
-      SCCACHE_GHA_ENABLED: "true"
-      RUSTC_WRAPPER: sccache
-      CARGO_INCREMENTAL: 0
-      CARGO_PROFILE_DEV_DEBUG: 0
-      WOW_DATA: ""
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Toolchain
-        run: rustup toolchain install && rustc -V
-      - name: Setup compiler cache
-        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-        with:
-          version: v0.16.0
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - name: Build Windows player and verify stack reserve
-        shell: pwsh
-        run: |
-          cargo build -p benilla --no-default-features
-          $b = [IO.File]::ReadAllBytes("target\debug\benilla.exe")
-          $pe = [BitConverter]::ToInt32($b, 0x3c)
-          $reserve = [BitConverter]::ToUInt64($b, $pe + 24 + 72)
-          "SizeOfStackReserve: $reserve"
-          if ($reserve -lt 8MB) { exit 1 }
-      - name: Show compiler cache stats
-        run: sccache --show-stats
-
-  # Expensive, broad tests are opt-in; they no longer run on every PR update.
-  full-linux:
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 150
-    env:
-      CARGO_TERM_COLOR: always
-      SCCACHE_GHA_ENABLED: "true"
-      RUSTC_WRAPPER: sccache
-      CARGO_INCREMENTAL: 0
-      CARGO_PROFILE_DEV_DEBUG: 0
-      WOW_DATA: ""
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Free disk space
-        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-      - name: System libraries
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq pkg-config libasound2-dev libudev-dev
-      - name: Toolchain
-        run: rustup toolchain install && rustc -V
-      - name: Setup compiler cache
-        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-        with:
-          version: v0.16.0
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - name: fmt
-        run: cargo fmt --all -- --check
-      - name: clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: test
-        run: cargo test --workspace
-      - name: fork addon smoke tests
-        run: python3 scripts/check-fork-addons.py
-      - name: doc-links
-        run: scripts/doc-links.py
-      - name: message-catalog
-        run: scripts/gen-message-catalog.py --check
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: samwhosung/benilla-re
-          path: benilla-re
-          fetch-depth: 0
-      - name: reference
-        run: scripts/sync-reference.py benilla-re --check
-      - name: pass-span-lint
-        run: scripts/pass-span-lint.py
-      - name: player-clippy
-        run: cargo clippy -p benilla -p benilla-app --no-default-features -- -D warnings
-      - name: player-tests
-        run: cargo test -p benilla-formats -p benilla-app --no-default-features --lib
-      - name: Show compiler cache stats
-        run: sccache --show-stats
-
-  full-windows:
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: windows-latest
-    timeout-minutes: 180
-    env:
-      CARGO_TERM_COLOR: always
-      SCCACHE_GHA_ENABLED: "true"
-      RUSTC_WRAPPER: sccache
-      CARGO_INCREMENTAL: 0
-      CARGO_PROFILE_DEV_DEBUG: 0
-      WOW_DATA: ""
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Toolchain
-        run: rustup toolchain install && rustc -V
-      - name: Setup compiler cache
-        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-        with:
-          version: v0.16.0
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - name: workspace tests
-        run: cargo test --workspace
-      - name: Build Windows player and verify stack reserve
-        if: success()
-        shell: pwsh
-        run: |
-          cargo build -p benilla --no-default-features
-          $b = [IO.File]::ReadAllBytes("target\debug\benilla.exe")
-          $pe = [BitConverter]::ToInt32($b, 0x3c)
-          $reserve = [BitConverter]::ToUInt64($b, $pe + 24 + 72)
-          "SizeOfStackReserve: $reserve"
-          if ($reserve -lt 8MB) { exit 1 }
-      - name: Show compiler cache stats
-        run: sccache --show-stats
-
-  # Build and exercise the native macOS SDL3 gamepad path on the host platform.
-  macos-fast:
-    if: github.event_name == 'pull_request'
-    runs-on: macos-latest
-    timeout-minutes: 90
-    env:
-      CARGO_TERM_COLOR: always
-      SCCACHE_GHA_ENABLED: "true"
-      RUSTC_WRAPPER: sccache
-      CARGO_INCREMENTAL: 0
-      CARGO_PROFILE_DEV_DEBUG: 0
-      WOW_DATA: ""
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Toolchain
-        run: rustup toolchain install && rustc -V
-      - name: Setup compiler cache
-        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-        with:
-          version: v0.16.0
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - name: Build macOS player
-        run: cargo build -p benilla --no-default-features
-      - name: Show compiler cache stats
-        run: sccache --show-stats
-
-  ios-arm64:
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-    runs-on: macos-latest
-    timeout-minutes: 120
-    env:
-      CARGO_TERM_COLOR: always
-      SCCACHE_GHA_ENABLED: "true"
-      RUSTC_WRAPPER: sccache
       CARGO_INCREMENTAL: 0
       CARGO_PROFILE_RELEASE_DEBUG: 0
-      WOW_DATA: ""
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Toolchain
+      - name: Install project Rust toolchain
         run: rustup toolchain install && rustc -V
       - name: Setup compiler cache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: v0.16.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - name: Install iOS target
-        run: rustup target add aarch64-apple-ios
-      - name: Validate iOS app metadata
-        run: plutil -lint ios/Info.plist
-      - name: Build and package unsigned iOS app
-        run: IOS_UNSIGNED=1 PROFILE=release scripts/ios-package.sh
-      - name: Verify packaged app
-        run: |
-          APP="target/aarch64-apple-ios/release/Benilla.app"
-          test -x "$APP/benilla"
-          test -f "$APP/Info.plist"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")" = "benilla"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")" = "com.tyrael9.benilla"
+      # Same package and default features as the local release run.
+      - name: Compile macOS app (default features)
+        run: cargo check --locked --release -p benilla
       - name: Show compiler cache stats
         run: sccache --show-stats

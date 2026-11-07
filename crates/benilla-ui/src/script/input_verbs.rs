@@ -1011,6 +1011,7 @@ mod tests {
                     reverse: true,
                     may_cast: true,
                     range_override: None,
+                    require_in_view: false,
                 },
                 ScriptCall::TargetLastTarget { may_cast: true },
                 ScriptCall::AttackTarget {

@@ -1319,41 +1319,6 @@ pub(crate) struct CameraPivot {
 /// Returns whether a mouse motion reached the body's hand-off this frame: the motion handler
 /// `0x514400` hands the camera's facing and pitch on (`0x5103e0`) for each motion while the mouse
 /// turns the body (`0x51446f`), before the body gates of `0x5145e0`, which are the caller's.
-pub(super) fn run_look_session(
-    mouse_motion: &AccumulatedMouseMotion,
-    rig: &mut CameraControl,
-    cam: &mut FlyCam,
-    face_yaw: &mut f32,
-    window: &mut Window,
-    cursor_opts: &mut CursorOptions,
-    inspect_enabled: bool,
-    arm: &mut crate::target::ClickArm,
-    look_cfg: LookConfig,
-    dynamics: &DynamicsInput,
-    focused: bool,
-    primaries: Primaries,
-    word_held: bool,
-) -> bool {
-    run_look_session_with_gamepad(
-        mouse_motion,
-        Vec2::ZERO,
-        Vec2::ZERO,
-        false,
-        rig,
-        cam,
-        face_yaw,
-        window,
-        cursor_opts,
-        inspect_enabled,
-        arm,
-        look_cfg,
-        dynamics,
-        focused,
-        primaries,
-        word_held,
-    )
-}
-
 pub(super) fn run_look_session_with_gamepad(
     mouse_motion: &AccumulatedMouseMotion,
     gamepad_look: Vec2,

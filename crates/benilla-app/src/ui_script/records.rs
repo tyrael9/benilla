@@ -417,8 +417,8 @@ mod tests {
 
     #[test]
     fn gamepad_pointer_ownership_filters_os_mouse_records_but_keeps_keys() {
-        let mut records = InputRecords::default();
-        records.records = vec![
+        let mut records = InputRecords {
+            records: vec![
             InputRecord {
                 record: Record::Key(key_event(KeyCode::Digit1, ButtonState::Pressed)),
                 mods: Default::default(),
@@ -437,7 +437,9 @@ mod tests {
                 mods: Default::default(),
                 at: Some(Vec2::ONE),
             },
-        ];
+            ],
+            ..Default::default()
+        };
 
         records.inject_gamepad_pointer(
             vec![InputRecord {

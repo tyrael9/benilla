@@ -115,9 +115,7 @@ pub(super) struct MoveAxes {
     pub analog: Vec2,
     /// The reference's `flags & 0xf`, off the net axes: W+S neither streams nor moves.
     pub translating: bool,
-    /// The raw strafe and turn keys, for the swim amounts and the wire's turn bits.
-    pub strafe_left: bool,
-    pub strafe_right: bool,
+    /// Raw turn keys, for the wire's turn bits.
     pub turn_left: bool,
     pub turn_right: bool,
 }
@@ -267,8 +265,6 @@ pub(super) fn move_axes_with(
         mouselook,
         turning,
         translating,
-        strafe_left,
-        strafe_right,
         turn_left,
         turn_right,
     }

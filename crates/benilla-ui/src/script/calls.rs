@@ -46,6 +46,8 @@ pub enum ScriptCall {
     TargetNearest {
         mode: NearestMode,
         reverse: bool,
+        /// Optional engine-owned scan radius; stock calls leave this unset and use the CVar.
+        range_override: Option<f32>,
         /// As [`ScriptCall::Select::may_cast`], for the pick's `SelectTarget` (`0x4941e6`); tag 4
         /// opened the cycle (`0x493f9b`).
         may_cast: bool,

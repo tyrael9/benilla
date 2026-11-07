@@ -1225,11 +1225,15 @@ impl CallHost for ScriptCallHost<'_, '_> {
                 mode,
                 reverse,
                 range_override,
+                require_in_view,
                 ..
             } => {
-                owed = appliers
-                    .select()
-                    .target_nearest_with_range(mode, reverse, range_override);
+                owed = appliers.select().target_nearest_with_options(
+                    mode,
+                    reverse,
+                    range_override,
+                    require_in_view,
+                );
             }
             ScriptCall::TargetLastTarget { .. } => owed = appliers.select().target_last_target(),
             ScriptCall::ClearTarget => owed = appliers.select().clear_target(),

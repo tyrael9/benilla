@@ -263,6 +263,106 @@ fn decode_custom_cursor_rgba(
 #[derive(Resource, Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub(crate) struct DisplayedCursor(pub(crate) crate::target::WorldCursor);
 
+/// Cursor images used by the per-instance gamepad cursor overlay. This is deliberately separate
+/// from the native OS cursor: each Benilla window renders its own cursor in its own UI quad pass.
+#[derive(Resource, Default)]
+struct VirtualCursorTextures {
+    textures: std::collections::HashMap<String, Handle<Image>>,
+}
+
+fn virtual_cursor_texture(
+    stem: &str,
+    textures: &mut VirtualCursorTextures,
+    world_assets: &mut benilla_assets::WorldAssets,
+    images: &mut Assets<Image>,
+) -> Option<Handle<Image>> {
+    if let Some(texture) = textures.textures.get(stem) {
+        return Some(texture.clone());
+    }
+
+    let path = cursor_path(stem);
+    if let Some(texture) = world_assets.sprite_texture(&path, images) {
+        textures.textures.insert(stem.to_string(), texture.clone());
+        return Some(texture);
+    }
+
+    // A grey/unavailable mode may not have an authored BLP. Use its normal counterpart.
+    if let Some(base) = stem.strip_prefix("Unable") {
+        if let Some(texture) = textures.textures.get(base) {
+            return Some(texture.clone());
+        }
+        let path = cursor_path(base);
+        if let Some(texture) = world_assets.sprite_texture(&path, images) {
+            textures.textures.insert(base.to_string(), texture.clone());
+            return Some(texture);
+        }
+    }
+
+    textures.textures.get("Point").cloned()
+}
+
+/// Draw the active LT pointer into this Benilla instance's own UI overlay lane. It never reads or
+/// moves the OS cursor, so two windows can each own an independent gamepad and pointer.
+fn update_virtual_cursor_overlay(
+    mouse: Res<crate::gamepad::GamepadVirtualMouse>,
+    displayed: Res<DisplayedCursor>,
+    mut quads: ResMut<crate::ui_pass::UiQuads>,
+    window: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    ui_scale: Res<crate::ui_script::UiScaleCvar>,
+    mut textures: ResMut<VirtualCursorTextures>,
+    world_assets: Option<ResMut<benilla_assets::WorldAssets>>,
+    mut images: ResMut<Assets<Image>>,
+    script: Option<NonSend<benilla_ui::script::UiScript>>,
+    screen: Res<crate::loading_screen::LoadingScreen>,
+) {
+    if !mouse.active {
+        return;
+    }
+    let Ok(window) = window.single() else {
+        return;
+    };
+    let Some(assets) = world_assets else {
+        return;
+    };
+
+    // A dragged item/spell/action uses the payload icon; otherwise follow the world's or
+    // FrameXML's current cursor mode (Point, Attack, Cast, Buy, ...).
+    let texture = if let Some(icon) = script
+        .as_deref()
+        .and_then(|script| payload_icon(script, screen.covering()))
+    {
+        let key = format!("payload:{icon}");
+        if let Some(handle) = textures.textures.get(&key).cloned() {
+            Some(handle)
+        } else {
+            assets
+                .sprite_texture(&icon, &mut images)
+                .inspect(|handle| {
+                    textures.textures.insert(key, handle.clone());
+                })
+        }
+    } else {
+        virtual_cursor_texture(
+            &displayed.0.stem(),
+            &mut textures,
+            &mut *assets.into_inner(),
+            &mut images,
+        )
+    };
+
+    let Some(texture) = texture else {
+        return;
+    };
+    let scale = crate::ui_script::seam_scale(window.height(), ui_scale.0);
+    let pos = Vec2::new(
+        mouse.position_ui.x * scale,
+        window.height() - mouse.position_ui.y * scale,
+    );
+    quads
+        .overlays
+        .push(crate::ui_script::extract::cursor_icon_quad(pos, texture));
+}
+
 /// Resolve this frame's displayed cursor: one sticky mode with two writers, the world (the
 /// WorldFrame's hover handler `0x481790`, only while it holds mouse focus) and FrameXML
 /// (`SetCursor`, `ResetCursor`, `ShowContainerSellCursor`, `ShowInspectCursor`). Between writes
@@ -408,7 +508,15 @@ impl Plugin for CursorPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<DisplayedCursor>()
             .init_resource::<CustomCursorName>()
-            .init_resource::<PointerDevice>();
+            .init_resource::<PointerDevice>()
+            .init_resource::<VirtualCursorTextures>()
+            .add_systems(
+                Update,
+                update_virtual_cursor_overlay
+                    .in_set(crate::ui_pass::UiQuadAppend)
+                    .after(crate::ui_script::UiInput)
+                    .after(drive_displayed_cursor),
+            );
         #[cfg(target_os = "macos")]
         app.add_systems(Startup, macos::setup.after(AssetSet::Open))
             .add_systems(

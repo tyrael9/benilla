@@ -1,5 +1,5 @@
-# Pull requests run fast, targeted checks. The expensive full workspace and platform matrix
-# remains available through workflow_dispatch before a release or a merge that needs it.
+# Pull requests run focused checks on the platforms that matter to this port.
+# Full workspace suites remain available through workflow_dispatch.
 name: CI
 
 on:
@@ -9,8 +9,9 @@ on:
 permissions:
   contents: read
 
+# Cancel obsolete runs for the same PR/branch, regardless of which commit started them.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}-${{ github.sha }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -36,21 +37,47 @@ jobs:
         run: scripts/gen-message-catalog.py --check
       - name: pass-span-lint
         run: scripts/pass-span-lint.py
-      # SDL3 is built from source for desktop polling.
       - name: SDL build dependencies
         run: sudo apt-get update -qq && sudo apt-get install -y -qq pkg-config libasound2-dev libudev-dev
-      # The UI-facing Lua bridge has its own focused tests.
       - name: gamepad Lua bridge tests
         run: cargo test -p benilla-ui --lib script::gamepad::tests
-      # Compile the real Bevy app integration, including SDL3 polling, movement/camera input,
-      # binding dispatch, and (on its own target) the iOS GameController adapter.
       - name: app gamepad integration check
         run: cargo check -p benilla-app --no-default-features --lib
       - name: app test code type-check
         run: cargo check -p benilla-app --no-default-features --tests
 
+  # Compile the actual Windows app/player without running the entire workspace test suite.
+  windows-fast:
+    if: github.event_name == 'pull_request'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: 1
+      CARGO_PROFILE_DEV_DEBUG: 0
+      WOW_DATA: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain
+        run: rustup toolchain install && rustc -V
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: App and test-code check
+        run: cargo check -p benilla-app --no-default-features --tests
+      - name: Build Windows player and verify stack reserve
+        shell: pwsh
+        run: |
+          cargo build -p benilla --no-default-features
+          $b = [IO.File]::ReadAllBytes("target\debug\benilla.exe")
+          $pe = [BitConverter]::ToInt32($b, 0x3c)
+          $reserve = [BitConverter]::ToUInt64($b, $pe + 24 + 72)
+          "SizeOfStackReserve: $reserve"
+          if ($reserve -lt 8MB) { exit 1 }
+
+  # Expensive, broad tests are opt-in; they no longer run on every PR update.
   full-linux:
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.number == 4)
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     env:
@@ -96,7 +123,7 @@ jobs:
         run: cargo test -p benilla-formats -p benilla-app --no-default-features --lib
 
   full-windows:
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.number == 4)
+    if: github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     timeout-minutes: 180
     env:
@@ -111,13 +138,10 @@ jobs:
       - name: Toolchain
         run: rustup toolchain install && rustc -V
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - name: test
-        run: cargo test --workspace --no-fail-fast
-      - name: name the test a crash took down
-        if: failure()
-        run: cargo test --workspace --no-fail-fast -- --test-threads=1
-      - name: player stack
-        if: ${{ !cancelled() }}
+      - name: workspace tests
+        run: cargo test --workspace
+      - name: Build Windows player and verify stack reserve
+        if: success()
         shell: pwsh
         run: |
           cargo build -p benilla --no-default-features

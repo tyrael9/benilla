@@ -69,6 +69,9 @@ jobs:
           cargo test -p benilla-app --test ui_script_wall
           cargo test -p benilla-ui --lib script::tests::reference_surface
           cargo test -p benilla-ui --test vm_parity
+      # Load the shipped addons in the real FrameXML harness, including stance/layer action-slot probes.
+      - name: Fork addon smoke tests
+        run: python3 scripts/check-fork-addons.py
       - name: Show compiler cache stats
         run: sccache --show-stats
 

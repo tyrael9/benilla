@@ -588,8 +588,6 @@ pub(super) fn control(
         //   carry no guid, so driving would write one body's pose onto another.
         // Possession is none of these: it runs the ordinary path below, on the creature.
         if player.server_riding || world_q.6.control_lost || world_q.6.reseat {
-            // The input filter belongs to the locally driven mover, not a spline, fear or reseat.
-            player.analog_move_magnitude = None;
             // The latch outlives the yield: lost control and an unresolved reseat leave the tick
             // no unit (`0x51466e`), but a ride keeps the mover and fails `0x5144e0`, so the tick
             // the ride's monster move runs (`0x602053`), and each press's, clears the bit
@@ -672,15 +670,6 @@ pub(super) fn control(
             turn_right,
             ..
         } = axes;
-        let analog_speed_starts_full = player.autorun
-            || player.auto_forward
-            || binds.pressed(crate::bindings::Input::MoveForward);
-        let analog_speed_multiplier = input::analog_move_speed_multiplier(
-            &mut player,
-            analog,
-            dt,
-            analog_speed_starts_full,
-        );
         if fwd_axis != 0 || side_axis != 0 || analog != Vec2::ZERO {
             net.12.moved();
         }
@@ -802,7 +791,7 @@ pub(super) fn control(
             },
         );
         if analog != Vec2::ZERO {
-            speed *= analog_speed_multiplier;
+            speed *= analog.length();
         }
         // `Jump` (`0x513bd0`) inlines `0x5144e0` and `0x514560`, which is `may_translate` term for
         // term: health, root and stand state 7. Hover's refusal is the movement handler's

@@ -45,5 +45,7 @@ jobs:
       # Same package and default features as the local release run.
       - name: Compile macOS app (default features)
         run: cargo check --release -p benilla
+      - name: Type-check unit tests
+        run: cargo check --release --tests -p benilla
       - name: Show compiler cache stats
         run: sccache --show-stats

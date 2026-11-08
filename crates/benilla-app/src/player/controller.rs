@@ -588,6 +588,8 @@ pub(super) fn control(
         //   carry no guid, so driving would write one body's pose onto another.
         // Possession is none of these: it runs the ordinary path below, on the creature.
         if player.server_riding || world_q.6.control_lost || world_q.6.reseat {
+            // The input filter belongs to the locally driven mover, not a spline, fear or reseat.
+            player.analog_move_magnitude = None;
             // The latch outlives the yield: lost control and an unresolved reseat leave the tick
             // no unit (`0x51466e`), but a ride keeps the mover and fails `0x5144e0`, so the tick
             // the ride's monster move runs (`0x602053`), and each press's, clears the bit

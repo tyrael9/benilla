@@ -670,8 +670,15 @@ pub(super) fn control(
             turn_right,
             ..
         } = axes;
-        let analog_speed_multiplier =
-            input::analog_move_speed_multiplier(&mut player, analog, dt);
+        let analog_speed_starts_full = player.autorun
+            || player.auto_forward
+            || binds.pressed(crate::bindings::Input::MoveForward);
+        let analog_speed_multiplier = input::analog_move_speed_multiplier(
+            &mut player,
+            analog,
+            dt,
+            analog_speed_starts_full,
+        );
         if fwd_axis != 0 || side_axis != 0 || analog != Vec2::ZERO {
             net.12.moved();
         }

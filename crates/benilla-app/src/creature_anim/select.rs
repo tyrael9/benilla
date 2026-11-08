@@ -334,8 +334,8 @@ pub(super) fn base_candidates(
     base_candidates_with_gait(state, walk_speed, ready, ranged_load, state_anim, None)
 }
 
-/// The local animation driver passes the gait it already has armed, allowing only the Run/Walk
-/// boundary to use hysteresis. Other selectors keep the original stateless speed thresholds.
+/// The animation driver passes the gait it already has armed, allowing only the Run/Walk boundary
+/// to use hysteresis. Stateless callers keep the original speed thresholds.
 pub(super) fn base_candidates_with_gait(
     state: &MovementState,
     walk_speed: f32,
@@ -360,8 +360,8 @@ pub(super) fn base_candidates_with_gait(
 }
 
 /// Ground locomotion candidates with a stable Run/Walk boundary. The public stateless
-/// selector passes no previous gait and retains the exact 1.12 threshold; the local player's
-/// animation driver passes its currently armed target and gets a ±0.25 yd/s hysteresis band.
+/// selector passes no previous gait and retains the exact 1.12 threshold; the stateful animation
+/// driver passes its currently armed target and gets a ±0.25 yd/s hysteresis band.
 fn ground_gait_candidates(
     speed: f32,
     walk_speed: f32,

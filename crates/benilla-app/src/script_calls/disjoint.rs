@@ -392,7 +392,6 @@ mod tests {
     #[derive(Resource, Default)]
     struct Cell(u32);
 
-    /// The members of a pair may conflict with one another, as the pair lends one at a time.
     #[test]
     fn the_appliers_system_param_state_is_heap_backed() {
         assert_eq!(
@@ -402,6 +401,7 @@ mod tests {
         );
     }
 
+    /// The members of a pair may conflict with one another, as the pair lends one at a time.
     #[test]
     fn a_pairs_members_may_conflict_with_each_other() {
         let mut app = App::new();

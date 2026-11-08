@@ -441,6 +441,16 @@ mod tests {
             autorun_first < 1.0 && autorun_first > 0.8,
             "taking over full-speed autorun eases toward the stick target: {autorun_first}"
         );
+        let (_, autorun_next) = smooth_analog_move_magnitude(
+            autorun_state,
+            Vec2::Y * 0.8,
+            1.0 / 60.0,
+            true,
+        );
+        assert!(
+            autorun_next < autorun_first && autorun_next > 0.8,
+            "autorun takeover keeps easing toward the target: {autorun_first} -> {autorun_next}"
+        );
 
         let (next_state, next) =
             smooth_analog_move_magnitude(first_state, Vec2::Y * 0.7, 1.0 / 60.0, false);

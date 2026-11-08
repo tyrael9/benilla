@@ -807,8 +807,7 @@ mod macos {
         mut focus: MessageReader<bevy::window::WindowFocused>,
         // The `Local`s below remember OS state, which outlives the VM, so none is a
         // [`crate::ui_script::VmMemo`].
-        mut window_focused: Local<Option<bool>>,
-        mut was_hidden: Local<bool>,
+        mut state: Local<(Option<bool>, bool)>,
         mut rects_disabled: Local<bool>,
         mut decode_failed: Local<HashSet<String>>,
         mut last_set: Local<Option<String>>,
@@ -820,7 +819,7 @@ mod macos {
         };
         // macOS resets the cursor to the arrow on every activation: re-assert on focus gain.
         for ev in focus.read() {
-            *window_focused = Some(ev.focused);
+            state.0 = Some(ev.focused);
             if ev.focused {
                 *last_set = None;
             }
@@ -850,7 +849,7 @@ mod macos {
         // NSCursor::hide is app-global on macOS. LT may stay held through an app switch, but
         // the other app must regain its system pointer until this window is focused again.
         let virtual_mouse_active = mouse.as_deref().is_some_and(|mouse| mouse.active)
-            && (*window_focused).unwrap_or(true);
+            && state.0.unwrap_or(true);
         let hidden = device.hides_with_virtual_mouse(
             super::look_released(Some(&*rig)),
             virtual_mouse_active,
@@ -913,11 +912,11 @@ mod macos {
                     }
                 }
             }
-            if hidden && !*was_hidden {
+            if hidden && !state.1 {
                 NSCursor::hide();
                 // The next un-look re-asserts even an unchanged cursor.
                 *last_set = None;
-            } else if !hidden && *was_hidden {
+            } else if !hidden && state.1 {
                 NSCursor::unhide();
             }
             if !hidden {
@@ -943,7 +942,7 @@ mod macos {
                 }
             }
         }
-        *was_hidden = hidden;
+        state.1 = hidden;
     }
 
     /// RGBA → `NSCursor`, via PNG and `NSImage::initWithData`.

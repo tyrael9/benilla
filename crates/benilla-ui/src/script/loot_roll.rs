@@ -64,11 +64,17 @@ impl LiveQuery for LootRollQuery {
 }
 
 /// Roll `roll_id` now: the host's answer, else the VM's copy.
-pub(super) fn entry(lua: &Lua, roll_id: u32) -> Option<LootRollEntry> {
+fn entry(lua: &Lua, roll_id: u32) -> Option<LootRollEntry> {
     ask(lua, &LootRollQuery { roll_id }).unwrap_or_else(|| {
         let model = lua.app_data_ref::<Model>().expect("model app_data");
         find(&model, roll_id).cloned()
     })
+}
+
+/// The item-bearing roll source for `GameTooltip:SetLootRollItem`, using the same live read as
+/// the getters and rejecting the empty rows that cannot build an item tooltip.
+pub(super) fn tooltip_entry(lua: &Lua, roll_id: u32) -> Option<LootRollEntry> {
+    entry(lua, roll_id).filter(|r| r.item_id != 0)
 }
 
 /// The VM's own copy of the listed rolls, oldest first, which the getters read only with no host.
@@ -254,7 +260,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{entry, LootRollEntry, LootRollQuery, LootRollsState};
+    use super::{tooltip_entry, LootRollEntry, LootRollQuery, LootRollsState};
     use crate::script::{CallHost, CallTail, ScriptCall, UiScript};
 
     /// A host that answers loot-roll reads without populating the VM's local snapshot.
@@ -314,7 +320,7 @@ mod tests {
         let mut host = LiveRollHost(expected.clone());
 
         s.hosted(&mut host, |_| {
-            let actual = entry(&lua, expected.roll_id)
+            let actual = tooltip_entry(&lua, expected.roll_id)
                 .expect("the host's active roll should be visible to the tooltip");
             assert_eq!(actual, expected);
         });

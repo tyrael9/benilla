@@ -183,8 +183,9 @@ pub(crate) fn reconcile_afk_mirror(
 
 /// The movement AFK clears: jump (`0x513d36`), forward/back (`0x514e23`), strafe (`0x514f0b`)
 /// and keyboard turn (`0x514fca`). They sit in the movement emitters, so only a key press
-/// clears; mouse-look turning never reaches `0x514f50`, and knockback, fear and splines press
-/// nothing. Jump is here but not in `player::follow`'s cancel set: two separate reference tables.
+/// clears; the gamepad's left-stick movement is its analog equivalent. Mouse-look turning never
+/// reaches `0x514f50`, and knockback, fear and splines press nothing. Jump is here but not in
+/// `player::follow`'s cancel set: two separate reference tables.
 /// A call's own press cleared inside it ([`crate::player::TickLegs`]); this takes the presses no
 /// call settled.
 pub(crate) fn movement_clears_afk(
@@ -198,23 +199,25 @@ pub(crate) fn movement_clears_afk(
     )>,
     commands: Res<crate::net::NetCommands>,
     chat: Res<ChatLog>,
+    gamepad: Res<crate::gamepad::GamepadSnapshot>,
 ) {
     use crate::bindings::Input;
     let (mirror, cvars, binds) = vm.own();
     if !mirror.is_afk() || cvars.flag("autoClearAFK") == Some(false) {
         return;
     }
-    let moved = [
-        Input::Jump,
-        Input::MoveForward,
-        Input::MoveBackward,
-        Input::StrafeLeft,
-        Input::StrafeRight,
-        Input::TurnLeft,
-        Input::TurnRight,
-    ]
-    .iter()
-    .any(|&c| binds.just_pressed(c) && !binds.settled(c));
+    let moved = gamepad.movement_input_changed()
+        || [
+            Input::Jump,
+            Input::MoveForward,
+            Input::MoveBackward,
+            Input::StrafeLeft,
+            Input::StrafeRight,
+            Input::TurnLeft,
+            Input::TurnRight,
+        ]
+        .iter()
+        .any(|&c| binds.just_pressed(c) && !binds.settled(c));
     if !moved {
         return;
     }

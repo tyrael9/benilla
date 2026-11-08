@@ -31,6 +31,60 @@ impl GamepadSnapshot {
         apply_move_deadzone(stick)
     }
 
+    /// Whether a gamepad control changed enough to count as a new user input event.
+    /// As with a held keyboard key, a control held at a steady value does not keep refreshing AFK.
+    pub(crate) fn input_changed(&self) -> bool {
+        const AXIS_EPSILON: f32 = 0.02;
+
+        let now = self.current;
+        let was = self.previous;
+        let buttons_changed = [
+            (now.a, was.a),
+            (now.b, was.b),
+            (now.x, was.x),
+            (now.y, was.y),
+            (now.l, was.l),
+            (now.r, was.r),
+            (now.minus, was.minus),
+            (now.plus, was.plus),
+            (now.l3, was.l3),
+            (now.r3, was.r3),
+            (now.dpad_up, was.dpad_up),
+            (now.dpad_down, was.dpad_down),
+            (now.dpad_left, was.dpad_left),
+            (now.dpad_right, was.dpad_right),
+        ]
+        .into_iter()
+        .any(|(now, was)| now != was);
+        let axis_changed = |now: f32, was: f32| (now - was).abs() > AXIS_EPSILON;
+        let axes_changed = [
+            (now.zl, was.zl),
+            (now.zr, was.zr),
+            (now.left_x, was.left_x),
+            (now.left_y, was.left_y),
+            (now.right_x, was.right_x),
+            (now.right_y, was.right_y),
+        ]
+        .into_iter()
+        .any(|(now, was)| axis_changed(now, was));
+
+        buttons_changed || axes_changed
+    }
+
+    /// A new directional movement from the left stick, including a deliberate change of direction.
+    /// A steady deflection is not a new input edge, just as holding a keyboard movement key is not.
+    pub(crate) fn movement_input_changed(&self) -> bool {
+        const EPSILON_SQUARED: f32 = 0.02 * 0.02;
+
+        let previous = Self {
+            current: self.previous,
+            ..Default::default()
+        }
+        .move_axis();
+        let current = self.move_axis();
+        current != Vec2::ZERO && current.distance_squared(previous) > EPSILON_SQUARED
+    }
+
     pub(crate) fn look_axis(&self) -> Vec2 {
         if self.current.zl > 0.5 {
             return Vec2::ZERO;
@@ -914,6 +968,9 @@ fn gamepad_rt_interact(
     }
 }
 
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct GamepadPoll;
+
 pub(crate) struct GamepadBridgePlugin;
 
 impl Plugin for GamepadBridgePlugin {
@@ -923,7 +980,9 @@ impl Plugin for GamepadBridgePlugin {
             .init_resource::<GamepadVirtualMouse>()
             .add_systems(
                 Update,
-                poll_platform_gamepad.before(crate::bindings::BindingHead),
+                poll_platform_gamepad
+                    .in_set(GamepadPoll)
+                    .before(crate::bindings::BindingHead),
             )
             .add_systems(
                 Update,
@@ -1127,6 +1186,58 @@ fn normalize_trigger(value: i16) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn controller_activity_tracks_edges_and_axis_changes_not_steady_holds() {
+        let mut snapshot = GamepadSnapshot::default();
+        snapshot.current.a = true;
+        assert!(snapshot.input_changed(), "a button press is activity");
+
+        snapshot.previous = snapshot.current;
+        assert!(
+            !snapshot.input_changed(),
+            "a button held without another edge is not repeated activity"
+        );
+
+        snapshot.current.left_x = 0.5;
+        assert!(snapshot.input_changed(), "a new stick position is activity");
+
+        snapshot.previous = snapshot.current;
+        assert!(
+            !snapshot.input_changed(),
+            "a steady stick position does not repeatedly stamp the idle timer"
+        );
+
+        snapshot.current.left_x = 0.0;
+        assert!(snapshot.input_changed(), "releasing the stick is activity");
+    }
+
+    #[test]
+    fn only_new_left_stick_movement_is_an_afk_clear_action() {
+        let mut snapshot = GamepadSnapshot::default();
+        snapshot.current.left_y = 0.5;
+        assert!(snapshot.movement_input_changed(), "moving from neutral clears AFK");
+
+        snapshot.previous = snapshot.current;
+        assert!(
+            !snapshot.movement_input_changed(),
+            "a steady deflection does not repeatedly clear AFK"
+        );
+
+        snapshot.current.left_y = 0.8;
+        assert!(
+            snapshot.movement_input_changed(),
+            "changing the movement direction or magnitude is a new movement input"
+        );
+
+        snapshot.previous = snapshot.current;
+        snapshot.current.left_y = 0.0;
+        snapshot.current.right_x = 0.8;
+        assert!(
+            !snapshot.movement_input_changed(),
+            "camera look alone does not clear AFK"
+        );
+    }
 
     #[test]
     fn both_sticks_use_the_radial_deadzone() {

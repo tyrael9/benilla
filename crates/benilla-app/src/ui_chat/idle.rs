@@ -44,6 +44,7 @@ const AUTO_LOGOUT_AFTER: Duration = Duration::from_millis(1_800_000);
 /// Stamp the clock on raw input, as the reference's seven writers of `[0xcf0bc8]` do: key down,
 /// first press only (`0x765f34`), key up (`0x765fec`), button down (`0x7662fb`) and up
 /// (`0x766461`), motion (`0x766152`, `0x766291`, mouselook included) and the wheel (`0x76651f`).
+/// Gamepad button edges and meaningful axis changes stand in for those raw device events.
 /// Holding a key is idle: auto-repeat is category 0xa (`0x424810`), whose handler `0x766070` has
 /// no store, so running with W held reaches the auto-AFK. A zero move does not stamp (`0x7660d0`).
 /// Only the vertical wheel stamps: the store sits in the handler of `WM_MOUSEWHEEL`, and
@@ -61,6 +62,7 @@ pub(crate) fn stamp_input(
     mut touches: MessageReader<bevy::input::touch::TouchInput>,
     motion: Res<AccumulatedMouseMotion>,
     held: Res<ButtonInput<KeyCode>>,
+    gamepad: Res<crate::gamepad::GamepadSnapshot>,
 ) {
     let shift = held.pressed(KeyCode::ShiftLeft) || held.pressed(KeyCode::ShiftRight);
     // `count()` and a bitwise `|` drain every reader, or unread messages warm the clock next frame.
@@ -75,7 +77,8 @@ pub(crate) fn stamp_input(
         | (motion.delta != Vec2::ZERO)
         // Touch is a first-class player input on iOS: a touch must refresh the idle clock just as
         // the mouse event it synthesizes does on desktop.
-        | (touches.read().count() != 0);
+        | (touches.read().count() != 0)
+        | gamepad.input_changed();
     if any {
         last.0 = time.elapsed();
     }
@@ -424,6 +427,7 @@ mod tests {
                 .init_resource::<LastInput>()
                 .init_resource::<AccumulatedMouseMotion>()
                 .init_resource::<ButtonInput<KeyCode>>()
+                .init_resource::<crate::gamepad::GamepadSnapshot>()
                 .add_message::<KeyboardInput>()
                 .add_message::<MouseButtonInput>()
                 .add_message::<MouseWheel>()
@@ -539,6 +543,37 @@ mod tests {
             }),
             touched,
             "a touch also stamps the idle clock on mobile"
+        );
+        assert_eq!(
+            stamped(&|app| {
+                app.world_mut()
+                    .resource_mut::<crate::gamepad::GamepadSnapshot>()
+                    .current
+                    .a = true;
+            }),
+            touched,
+            "a gamepad button press refreshes the idle clock"
+        );
+        assert_eq!(
+            stamped(&|app| {
+                app.world_mut()
+                    .resource_mut::<crate::gamepad::GamepadSnapshot>()
+                    .current
+                    .left_x = 0.5;
+            }),
+            touched,
+            "a gamepad stick movement refreshes the idle clock"
+        );
+        assert_eq!(
+            stamped(&|app| {
+                let mut pad = app
+                    .world_mut()
+                    .resource_mut::<crate::gamepad::GamepadSnapshot>();
+                pad.previous.left_x = 0.5;
+                pad.current.left_x = 0.5;
+            }),
+            Duration::ZERO,
+            "a steady held stick does not repeatedly refresh the idle clock"
         );
 
         // Auto-repeat is category 0xa, whose handler `0x766070` has no store.

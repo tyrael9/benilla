@@ -195,7 +195,12 @@ impl Plugin for UiChatPlugin {
             )
             // The last-input stamp `[0xcf0bc8]`, ungated and ahead of the UI pass: the reference
             // stamps raw input before dispatch, so a key the chat box swallows still counts.
-            .add_systems(Update, idle::stamp_input.before(UiInput))
+            .add_systems(
+                Update,
+                idle::stamp_input
+                    .after(crate::gamepad::GamepadPoll)
+                    .before(UiInput),
+            )
             .add_systems(
                 Update,
                 (

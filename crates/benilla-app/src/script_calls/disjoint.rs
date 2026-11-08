@@ -394,8 +394,10 @@ mod tests {
 
     #[test]
     fn the_appliers_system_param_state_is_heap_backed() {
+        type State = <crate::script_calls::Appliers<'static, 'static> as SystemParam>::State;
+
         assert_eq!(
-            std::mem::size_of::<<crate::script_calls::Appliers<'static, 'static> as SystemParam>::State>(),
+            std::mem::size_of::<State>(),
             std::mem::size_of::<Box<()>>(),
             "the large appliers state must not live on the iOS main-thread stack"
         );

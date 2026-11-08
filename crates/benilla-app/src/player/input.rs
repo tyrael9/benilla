@@ -278,6 +278,40 @@ fn discrete_axis(value: f32) -> i32 {
     }
 }
 
+/// Time constant for filtering left-stick magnitude while it is held. This smooths both the
+/// kinematic speed and the animation rate derived from the achieved movement speed, without
+/// adding delay to the first frame of stick input.
+const ANALOG_MOVE_SMOOTHING_SECONDS: f32 = 0.05;
+
+/// Update the stick's speed multiplier. Releasing the stick relinquishes analog speed control
+/// immediately, so autorun/keyboard movement returns to its full configured speed.
+pub(super) fn analog_move_speed_multiplier(
+    player: &mut Player,
+    analog: Vec2,
+    dt: f32,
+) -> f32 {
+    let (next, multiplier) =
+        smooth_analog_move_magnitude(player.analog_move_magnitude, analog, dt);
+    player.analog_move_magnitude = next;
+    multiplier
+}
+
+fn smooth_analog_move_magnitude(
+    previous: Option<f32>,
+    analog: Vec2,
+    dt: f32,
+) -> (Option<f32>, f32) {
+    if analog == Vec2::ZERO {
+        return (None, 1.0);
+    }
+
+    let target = analog.length().clamp(0.0, 1.0);
+    let current = previous.unwrap_or(target);
+    let blend = 1.0 - (-dt.max(0.0) / ANALOG_MOVE_SMOOTHING_SECONDS).exp();
+    let next = current + (target - current) * blend;
+    (Some(next), next)
+}
+
 /// The transition into both mouse bits held (`0x514a73`, `0x5150e2`): a primary bit rose with the
 /// other held, MOVEANDSTEER's among them.
 pub(super) fn both_engaged(binds: &crate::bindings::BindingsState) -> bool {
@@ -387,6 +421,25 @@ mod tests {
 
         assert!(!axes.translating);
         assert_eq!(axes.analog, Vec2::ZERO);
+    }
+
+    #[test]
+    fn analog_speed_smoothing_filters_held_stick_changes_but_not_release() {
+        let (first_state, first) =
+            smooth_analog_move_magnitude(None, Vec2::Y * 0.8, 1.0 / 60.0);
+        assert!((first - 0.8).abs() < 1e-6, "first input has no ramp-in lag");
+
+        let (next_state, next) =
+            smooth_analog_move_magnitude(first_state, Vec2::Y * 0.7, 1.0 / 60.0);
+        assert!(
+            next < first && next > 0.7,
+            "small stick fluctuations are followed smoothly: {first} -> {next}"
+        );
+
+        let (released_state, released) =
+            smooth_analog_move_magnitude(next_state, Vec2::ZERO, 1.0 / 60.0);
+        assert_eq!(released_state, None);
+        assert_eq!(released, 1.0, "autorun resumes full speed immediately");
     }
 
     /// `0x515090` cancels on the command press (`0x5150ce`), and nothing between the press and

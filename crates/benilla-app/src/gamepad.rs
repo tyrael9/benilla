@@ -20,15 +20,15 @@ pub(crate) struct GamepadSnapshot {
 }
 
 impl GamepadSnapshot {
-    /// The old controller's radial deadzone: a centered stick is zero, then the remaining
-    /// magnitude is remapped to the full range without changing its direction.
+    /// Radial movement deadzone with a small outer band: reach full speed before the stick's
+    /// physical stop, while preserving direction and the useful partial-tilt range.
     pub(crate) fn move_axis(&self) -> Vec2 {
         let stick = if self.current.touch_move_active {
             Vec2::new(self.current.touch_move_x, self.current.touch_move_y)
         } else {
             Vec2::new(self.current.left_x, self.current.left_y)
         };
-        apply_deadzone(stick, 0.15)
+        apply_move_deadzone(stick)
     }
 
     pub(crate) fn look_axis(&self) -> Vec2 {
@@ -549,6 +549,24 @@ fn update_gamepad_virtual_mouse(
     mouse.right_down = snapshot.current.b;
 }
 
+const MOVE_STICK_INNER_DEADZONE: f32 = 0.15;
+const MOVE_STICK_OUTER_DEADZONE: f32 = 0.95;
+
+/// The movement stick's radial deadzone. The outer band maps to full magnitude before the
+/// hardware reaches its stop, which compensates for controllers that report only ~0.95 at full tilt.
+fn apply_move_deadzone(value: Vec2) -> Vec2 {
+    let magnitude = value.length();
+    if magnitude <= MOVE_STICK_INNER_DEADZONE {
+        return Vec2::ZERO;
+    }
+    let direction = value / magnitude;
+    let remapped = ((magnitude - MOVE_STICK_INNER_DEADZONE)
+        / (MOVE_STICK_OUTER_DEADZONE - MOVE_STICK_INNER_DEADZONE))
+        .clamp(0.0, 1.0);
+    direction * remapped
+}
+
+/// Camera look and the legacy right-stick path keep their own inner-deadzone behavior.
 fn apply_deadzone(value: Vec2, deadzone: f32) -> Vec2 {
     let magnitude = value.length();
     if magnitude <= deadzone {
@@ -1133,6 +1151,28 @@ mod tests {
         };
         assert_eq!(snapshot.move_axis(), Vec2::Y);
         assert_eq!(snapshot.look_axis(), Vec2::X);
+    }
+
+    #[test]
+    fn the_movement_stick_reaches_full_speed_before_the_physical_stop() {
+        let near_edge = GamepadSnapshot {
+            current: GamepadLuaState {
+                left_y: 0.95,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(near_edge.move_axis(), Vec2::Y);
+
+        let partial = GamepadSnapshot {
+            current: GamepadLuaState {
+                left_y: 0.90,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let magnitude = partial.move_axis().length();
+        assert!(magnitude < 1.0 && magnitude > 0.9, "partial tilt remains analog: {magnitude}");
     }
 
     #[test]

@@ -25,7 +25,9 @@ pub(crate) fn measure_request(
     // `GetStringWidth` answers the unwrapped width (the extent measure `0x5c6940`), its line seeded
     // with the shadow's x offset at the seam alone: `0x772890` leaves `[fs+0x108]` unscaled.
     let natural = super::string_width(e, &r.text, spec, r.shadow_x * seam);
-    // Unwrapped, the laid-out width is that same measure (`[fs+0xfc]`).
+    // A FontString with no pinned width sizes its rect from this measure. Keep the historical
+    // layout gutter so the device-pixel line fit cannot ellipsize text against its own auto-sized
+    // box. This is layout-only: `natural` remains the exact `GetStringWidth` answer.
     let (w, h) = match wrap {
         Some(w) => {
             // `0x7729b0` measures the string `0x771ec0` returns: with `maxLines` the text is cut
@@ -35,7 +37,9 @@ pub(crate) fn measure_request(
                 .flatten();
             super::measure_text(e, cut.as_deref().unwrap_or(&r.text), wrap, spec)
         }
-        None => (natural, super::unwrapped_height(e, &r.text, spec)),
+        // The old auto-size measure used ceil(width) + 1.0. The reference measure is now exact;
+        // preserve that visual gutter in the layout extent without padding GetStringWidth.
+        None => (natural.ceil() + 1.0, super::unwrapped_height(e, &r.text, spec)),
     };
     (w / rs, h / rs, natural / rs)
 }
@@ -257,6 +261,42 @@ mod tests {
             "the gap rounds up to the device pixel"
         );
         assert!((height(-5.0) - flush).abs() < 1e-4, "a negative gap is 0");
+    }
+
+    /// Intrinsic FontString sizing keeps its historical layout gutter without padding
+    /// GetStringWidth: the box is slightly wider than the exact measured glyph extent at both
+    /// ordinary and non-unit owner scales.
+    #[test]
+    fn auto_sized_fontstrings_keep_layout_headroom_separate_from_string_width() {
+        benilla_formats::wow_data_or_skip!();
+        let mut e = super::super::engine::test_engine(1.0).expect("the client faces open");
+        for scale in [1.0f32, 0.9] {
+            let req = benilla_ui::script::MeasureRequest {
+                id: 0,
+                font: Some("Fonts\\FRIZQT__.TTF".into()),
+                height: Some(12.0),
+                text_height: None,
+                wrap_width: None,
+                outline: benilla_ui::script::Outline::None,
+                spacing: 0.0,
+                shadow_x: 0.0,
+                non_space_wrap: false,
+                max_lines: 0,
+                scale,
+                text: "PetName".into(),
+                key: 0,
+            };
+            let (layout_w, _, string_w) = super::measure_request(&mut e, 1.0, &req);
+            let expected_layout_px = (string_w * scale).ceil() + 1.0;
+            assert!(
+                ((layout_w * scale) - expected_layout_px).abs() < 1e-4,
+                "scale {scale}: layout width {layout_w} and string width {string_w}"
+            );
+            assert!(
+                layout_w > string_w,
+                "scale {scale}: an auto-sized FontString must have room beyond its text"
+            );
+        }
     }
 
     /// A FontString with a width and no height takes its height from the text `0x771ec0` returns

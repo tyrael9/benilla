@@ -49,6 +49,28 @@ fn walk_run_boundary_is_twice_walk_speed() {
     assert_eq!(gait_candidates(&moving_forward(5.1), 2.5, None, None)[0], 5);
 }
 
+#[test]
+fn local_run_walk_selection_has_hysteresis_around_the_speed_boundary() {
+    let pick = |speed, previous| {
+        base_candidates_with_gait(&moving_forward(speed), 2.5, None, None, None, previous)
+            .as_slice()[0]
+    };
+
+    // Coming from Walk, small upward fluctuations do not arm Run.
+    assert_eq!(pick(5.10, Some(4)), 4);
+    assert_eq!(pick(5.25, Some(4)), 4);
+    assert_eq!(pick(5.26, Some(4)), 5);
+
+    // Coming from Run (or Sprint), small downward fluctuations do not restart Walk.
+    assert_eq!(pick(4.90, Some(5)), 5);
+    assert_eq!(pick(4.76, Some(143)), 5);
+    assert_eq!(pick(4.75, Some(5)), 4);
+
+    // A fresh gait still enters at the original 5.0 yd/s boundary.
+    assert_eq!(pick(4.90, None), 4);
+    assert_eq!(pick(5.10, None), 5);
+}
+
 /// The selector reads the speed, never `MOVEFLAG_WALK_MODE`: walk mode's speed, `min(walk, run)`,
 /// lands under the `2 × walkSpeed` Run boundary at any 1.12 speed set, so the speed cascade feeds
 /// the gait cascade here with no number in between.

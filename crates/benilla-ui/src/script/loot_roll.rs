@@ -64,7 +64,7 @@ impl LiveQuery for LootRollQuery {
 }
 
 /// Roll `roll_id` now: the host's answer, else the VM's copy.
-fn entry(lua: &Lua, roll_id: u32) -> Option<LootRollEntry> {
+pub(super) fn entry(lua: &Lua, roll_id: u32) -> Option<LootRollEntry> {
     ask(lua, &LootRollQuery { roll_id }).unwrap_or_else(|| {
         let model = lua.app_data_ref::<Model>().expect("model app_data");
         find(&model, roll_id).cloned()
@@ -254,8 +254,24 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{LootRollEntry, LootRollsState};
-    use crate::script::UiScript;
+    use super::{entry, LootRollEntry, LootRollQuery, LootRollsState};
+    use crate::script::{CallHost, CallTail, ScriptCall, UiScript};
+
+    /// A host that answers loot-roll reads without populating the VM's local snapshot.
+    struct LiveRollHost(LootRollEntry);
+
+    impl CallHost for LiveRollHost {
+        fn apply(&mut self, _: &mut UiScript, _: ScriptCall) -> Option<CallTail> {
+            None
+        }
+
+        fn read_live(&mut self, ask: &mut crate::script::live::LiveAsk<'_>) -> bool {
+            let roll = self.0.clone();
+            ask.answer(|query: &LootRollQuery| {
+                (query.roll_id == roll.roll_id).then_some(roll)
+            })
+        }
+    }
 
     fn rolls() -> LootRollsState {
         LootRollsState {
@@ -288,6 +304,20 @@ mod tests {
                 },
             ],
         }
+    }
+
+    #[test]
+    fn tooltip_entry_reads_the_live_host_when_the_vm_snapshot_is_empty() {
+        let mut s = UiScript::new().unwrap();
+        let lua = s.lua().clone();
+        let expected = rolls().rolls[0].clone();
+        let mut host = LiveRollHost(expected.clone());
+
+        s.hosted(&mut host, |_| {
+            let actual = entry(&lua, expected.roll_id)
+                .expect("the host's active roll should be visible to the tooltip");
+            assert_eq!(actual, expected);
+        });
     }
 
     #[test]

@@ -337,13 +337,16 @@ pub(super) fn run(
                         )
                     })
                 });
+                // The local avatar and its mount retain their current gait through small
+                // speed changes; remote units keep the reference's stateless threshold.
+                let previous_gait = if traced { drv.gait } else { None };
                 let base = base_candidates_with_gait(
                     &mv,
                     walk,
                     ready,
                     ranged_load,
                     state_anim,
-                    drv.gait,
+                    previous_gait,
                 );
                 let cands = base.as_slice();
                 // The stationary cast/channel pin (`[CGUnit+0xb4]`), full-body over the Ready and

@@ -335,7 +335,14 @@ pub(super) fn run(
                         )
                     })
                 });
-                let base = base_candidates(&mv, walk, ready, ranged_load, state_anim);
+                let base = base_candidates_with_gait(
+                    &mv,
+                    walk,
+                    ready,
+                    ranged_load,
+                    state_anim,
+                    drv.gait,
+                );
                 let cands = base.as_slice();
                 // The stationary cast/channel pin (`[CGUnit+0xb4]`), full-body over the Ready and
                 // state-emote idles; stationary is `[9e8] & 0x20000f`, never the turn bits, so a

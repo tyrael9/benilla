@@ -359,9 +359,6 @@ pub(crate) struct Player {
     /// Horizontal velocity (yd/s): from input while grounded, the frozen take-off momentum while
     /// airborne, bar one [`AIR_NUDGE_SPEED`] steer after a standstill jump.
     pub(super) horiz_vel: Vec3,
-    /// Filtered left-stick magnitude while analog movement owns the speed. Cleared as soon as the
-    /// stick returns to center, so autorun and keyboard movement retain their exact full speed.
-    pub(super) analog_move_magnitude: Option<f32>,
     /// The movement flags we last streamed; this frame's are diffed against them to emit a
     /// `MSG_MOVE_*` per axis transition.
     pub(super) move_flags: u32,

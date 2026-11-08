@@ -385,6 +385,7 @@ fn written_at(world: UnsafeWorldCell, tick: Tick) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use bevy::ecs::system::SystemParam;
     use bevy::prelude::*;
 
     use super::Pair;

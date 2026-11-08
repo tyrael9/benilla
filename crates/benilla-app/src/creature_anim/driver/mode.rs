@@ -9,7 +9,9 @@ use bevy::prelude::*;
 use crate::net::ObjectStore;
 use crate::sound::EmoteSounds;
 
-use super::super::select::{self, base_candidates, playback_rate, ready_anim, Mode, DEATH, STAND};
+use super::super::select::{
+    self, base_candidates_with_gait, playback_rate, ready_anim, Mode, DEATH, STAND,
+};
 use super::super::{find_resolved, move_flags, AnimDriver, CastHold, MovementState, Wielded};
 use super::play::{enter_special, leave_special, oneshot_finished, play, play_clip, roll_loop};
 use super::transplant_up;

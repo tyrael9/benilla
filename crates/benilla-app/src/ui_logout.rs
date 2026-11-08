@@ -148,6 +148,11 @@ impl SessionPosts {
     pub(crate) fn take_stop_cinematic(&self) -> bool {
         self.stop_cinematic.swap(false, Ordering::Relaxed)
     }
+
+    /// Request a cinematic stop from a native input path, such as a mobile tap.
+    pub(crate) fn post_stop_cinematic(&self) {
+        self.stop_cinematic.store(true, Ordering::Relaxed);
+    }
 }
 
 /// The session verbs' engine half ([`crate::script_calls::ScriptCallHost`]): each sends its

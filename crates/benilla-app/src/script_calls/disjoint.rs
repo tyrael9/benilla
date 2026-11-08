@@ -54,6 +54,8 @@ macro_rules! disjoint_set {
             lend: Option<(bevy::ecs::change_detection::Tick, &'static str)>,
         }
 
+        /// Heap-backed: the appliers aggregate many Bevy query/system-param states, which can
+        /// exceed the iOS main thread's 1 MiB stack when Bevy initializes a schedule.
         #[doc(hidden)]
         $vis struct $state {
             $($(#[cfg($cfg)])? $field: <$ty as bevy::ecs::system::SystemParam>::State,)*
@@ -63,16 +65,16 @@ macro_rules! disjoint_set {
         // holds outside the set ([`crate::script_calls::disjoint::gather`]), and lends one member
         // at a time, through `&mut self`.
         unsafe impl bevy::ecs::system::SystemParam for $name<'_, '_> {
-            type State = $state;
+            type State = Box<$state>;
             type Item<'w, 's> = $name<'w, 's>;
 
             fn init_state(world: &mut bevy::ecs::world::World) -> Self::State {
-                $state {
+                Box::new($state {
                     $(
                         $(#[cfg($cfg)])?
                         $field: <$ty as bevy::ecs::system::SystemParam>::init_state(world),
                     )*
-                }
+                })
             }
 
             fn init_access(
@@ -142,7 +144,7 @@ macro_rules! disjoint_set {
                 change_tick: bevy::ecs::change_detection::Tick,
             ) -> Self::Item<'w, 's> {
                 $name {
-                    states: state,
+                    states: state.as_mut(),
                     meta: meta.clone(),
                     world,
                     change_tick,
@@ -391,6 +393,15 @@ mod tests {
     struct Cell(u32);
 
     /// The members of a pair may conflict with one another, as the pair lends one at a time.
+    #[test]
+    fn the_appliers_system_param_state_is_heap_backed() {
+        assert_eq!(
+            std::mem::size_of::<<crate::script_calls::Appliers<'static, 'static> as SystemParam>::State>(),
+            std::mem::size_of::<Box<()>>(),
+            "the large appliers state must not live on the iOS main-thread stack"
+        );
+    }
+
     #[test]
     fn a_pairs_members_may_conflict_with_each_other() {
         let mut app = App::new();

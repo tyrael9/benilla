@@ -9,9 +9,7 @@ use bevy::prelude::*;
 use crate::net::ObjectStore;
 use crate::sound::EmoteSounds;
 
-use super::super::select::{
-    self, base_candidates_with_gait, playback_rate, ready_anim, Mode, DEATH, STAND,
-};
+use super::super::select::{self, base_candidates, playback_rate, ready_anim, Mode, DEATH, STAND};
 use super::super::{find_resolved, move_flags, AnimDriver, CastHold, MovementState, Wielded};
 use super::play::{enter_special, leave_special, oneshot_finished, play, play_clip, roll_loop};
 use super::transplant_up;
@@ -337,17 +335,7 @@ pub(super) fn run(
                         )
                     })
                 });
-                // The local avatar and its mount retain their current gait through small
-                // speed changes; remote units keep the reference's stateless threshold.
-                let previous_gait = if traced { drv.gait } else { None };
-                let base = base_candidates_with_gait(
-                    &mv,
-                    walk,
-                    ready,
-                    ranged_load,
-                    state_anim,
-                    previous_gait,
-                );
+                let base = base_candidates(&mv, walk, ready, ranged_load, state_anim);
                 let cands = base.as_slice();
                 // The stationary cast/channel pin (`[CGUnit+0xb4]`), full-body over the Ready and
                 // state-emote idles; stationary is `[9e8] & 0x20000f`, never the turn bits, so a

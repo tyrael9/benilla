@@ -864,7 +864,7 @@ pub(super) fn install_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             let h = frame_handle_of(lua, &this)?;
             // Use the same live-host-first lookup as GetLootRollItemInfo and
             // GetLootRollItemLink. The VM snapshot is only a fallback when no host read is lent.
-            let entry = super::loot_roll::entry(lua, roll_id).filter(|r| r.item_id != 0);
+            let entry = super::loot_roll::tooltip_entry(lua, roll_id);
             let Some(entry) = entry else {
                 return Ok(());
             };

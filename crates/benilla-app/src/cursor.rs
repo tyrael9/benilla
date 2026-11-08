@@ -791,8 +791,8 @@ mod macos {
         world.insert_non_send_resource(NativeCursors(cursors));
     }
 
-    /// Disable the window's cursor rects once, set the payload or mode cursor while not looking,
-    /// and hide or unhide it across mouselook.
+    /// Disable the window's cursor rects once, set the payload or mode cursor while the native
+    /// pointer is visible, and hide it while mouselook or the LT overlay owns the pointer.
     pub(super) fn drive(
         cursors: Option<NonSend<NativeCursors>>,
         mut payload_cursors: NonSendMut<PayloadCursors>,
@@ -807,7 +807,8 @@ mod macos {
         mut focus: MessageReader<bevy::window::WindowFocused>,
         // The `Local`s below remember OS state, which outlives the VM, so none is a
         // [`crate::ui_script::VmMemo`].
-        mut was_looking: Local<bool>,
+        mut window_focused: Local<Option<bool>>,
+        mut was_hidden: Local<bool>,
         mut rects_disabled: Local<bool>,
         mut decode_failed: Local<HashSet<String>>,
         mut last_set: Local<Option<String>>,
@@ -819,6 +820,7 @@ mod macos {
         };
         // macOS resets the cursor to the arrow on every activation: re-assert on focus gain.
         for ev in focus.read() {
+            *window_focused = Some(ev.focused);
             if ev.focused {
                 *last_set = None;
             }
@@ -845,9 +847,13 @@ mod macos {
         }
         // The device's one flag decides (`0x595c20`). `CursorOptions.visible` is inert here, so
         // AppKit's hide and unhide run on its edges only, which keeps the counter balanced.
+        // NSCursor::hide is app-global on macOS. LT may stay held through an app switch, but
+        // the other app must regain its system pointer until this window is focused again.
+        let virtual_mouse_active = mouse.as_deref().is_some_and(|mouse| mouse.active)
+            && (*window_focused).unwrap_or(true);
         let hidden = device.hides_with_virtual_mouse(
             super::look_released(Some(&*rig)),
-            mouse.as_deref().is_some_and(|mouse| mouse.active),
+            virtual_mouse_active,
         );
         let stem = mode.0.stem();
         // Mode 41 shows the picture `SetCursor` loaded, built from its path on first use.
@@ -907,11 +913,11 @@ mod macos {
                     }
                 }
             }
-            if hidden && !*was_looking {
+            if hidden && !*was_hidden {
                 NSCursor::hide();
                 // The next un-look re-asserts even an unchanged cursor.
                 *last_set = None;
-            } else if !hidden && *was_looking {
+            } else if !hidden && *was_hidden {
                 NSCursor::unhide();
             }
             if !hidden {
@@ -937,7 +943,7 @@ mod macos {
                 }
             }
         }
-        *was_looking = hidden;
+        *was_hidden = hidden;
     }
 
     /// RGBA → `NSCursor`, via PNG and `NSImage::initWithData`.

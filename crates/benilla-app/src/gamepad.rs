@@ -150,6 +150,8 @@ struct TouchGestureState {
     ui_pointer: Option<Vec2>,
     clear_world_pointer_next: bool,
     clear_ui_pointer_next: bool,
+    /// A finger that began during a cinematic is consumed until it lifts.
+    cinematic_touch: Option<u64>,
 }
 
 fn touch_stick_contains(point: Vec2, centre: Vec2, radius: f32) -> bool {
@@ -186,6 +188,8 @@ fn inject_touch_input(
     widescreen: Option<Res<crate::video::Widescreen>>,
     time: Res<Time>,
     script: Option<NonSend<UiScript>>,
+    cinematic: Option<Res<crate::cinematic::Cinematic>>,
+    posts: Option<Res<crate::ui_logout::SessionPosts>>,
 ) {
     use crate::ui_script::{Record, UiScreen};
     use bevy::input::mouse::MouseButton;
@@ -196,6 +200,7 @@ fn inject_touch_input(
     const UI_LONG_PRESS_SECS: f32 = 3.0;
 
     let state = state.get_for(script.as_deref());
+    let cinematic_playing = cinematic.as_deref().is_some_and(|cine| cine.is_playing());
     let Ok(window) = window.single() else {
         return;
     };
@@ -304,7 +309,14 @@ fn inject_touch_input(
 
         match phase {
             TouchPhase::Started => {
-                if claim_move {
+                if cinematic_playing {
+                    // The reference's ESC path already owns the correct fade and server ack.
+                    // Consume this finger so the tap cannot also click or move the world.
+                    state.cinematic_touch = Some(id);
+                    if let Some(posts) = posts.as_deref() {
+                        posts.post_stop_cinematic();
+                    }
+                } else if claim_move {
                     state.move_id = Some(id);
                     state.move_axis = touch_stick_axes(ui, centre, stick.3);
                 } else if can_route_ui && hit_ui {
@@ -333,6 +345,7 @@ fn inject_touch_input(
                     state.world_pointer = Some(raw);
                 }
             }
+            TouchPhase::Moved if state.cinematic_touch == Some(id) => {}
             TouchPhase::Moved if state.move_id == Some(id) => {
                 state.move_axis = touch_stick_axes(ui, centre, stick.3);
             }
@@ -371,6 +384,9 @@ fn inject_touch_input(
                 gesture.window_position = raw;
                 state.world_pointer = Some(raw);
                 state.world = Some(gesture);
+            }
+            TouchPhase::Ended | TouchPhase::Canceled if state.cinematic_touch == Some(id) => {
+                state.cinematic_touch = None;
             }
             TouchPhase::Ended | TouchPhase::Canceled if state.move_id == Some(id) => {
                 state.move_id = None;
@@ -456,7 +472,8 @@ fn inject_touch_input(
     snapshot.touch_world_pointer = state.world_pointer;
     snapshot.touch_look_active |= state.world.is_some_and(|gesture| gesture.dragging);
 
-    let touch_owns_pointer = state.move_id.is_some()
+    let touch_owns_pointer = state.cinematic_touch.is_some()
+        || state.move_id.is_some()
         || state.ui.is_some()
         || state.world.is_some()
         || state.pending_world_release.is_some()

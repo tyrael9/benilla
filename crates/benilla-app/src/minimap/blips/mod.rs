@@ -201,6 +201,9 @@ pub(super) type BlipInputs<'w, 's> = (
     Option<Res<'w, crate::go_templates::Locks>>,
     Res<'w, crate::poi_marker::PoiMarker>,
     Option<Res<'w, crate::area_poi::AreaPoiRes>>,
+    // Match the UI hover walk's pointer source: touch, LT virtual mouse, then the OS cursor.
+    Option<Res<'w, crate::gamepad::GamepadSnapshot>>,
+    Option<Res<'w, crate::gamepad::GamepadVirtualMouse>>,
 );
 
 /// Every streamed object the classifier considers; our own avatar is the arrow, never a dot.

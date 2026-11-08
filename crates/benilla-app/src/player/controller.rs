@@ -670,6 +670,8 @@ pub(super) fn control(
             turn_right,
             ..
         } = axes;
+        let analog_speed_multiplier =
+            input::analog_move_speed_multiplier(&mut player, analog, dt);
         if fwd_axis != 0 || side_axis != 0 || analog != Vec2::ZERO {
             net.12.moved();
         }
@@ -791,7 +793,7 @@ pub(super) fn control(
             },
         );
         if analog != Vec2::ZERO {
-            speed *= analog.length();
+            speed *= analog_speed_multiplier;
         }
         // `Jump` (`0x513bd0`) inlines `0x5144e0` and `0x514560`, which is `may_translate` term for
         // term: health, root and stand state 7. Hover's refusal is the movement handler's

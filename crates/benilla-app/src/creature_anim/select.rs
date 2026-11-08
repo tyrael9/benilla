@@ -11,6 +11,10 @@ pub(super) const DEFAULT_WALK_SPEED: f32 = 2.5;
 /// At or above this speed (yd/s) a unit plays Sprint (143) over Run (`[0x80c484]`, `0x5fd202`).
 const FAST_RUN_SPEED: f32 = 11.0;
 
+/// Separate run-entry and run-exit speeds by this amount to keep small input fluctuations from
+/// repeatedly re-arming Walk (4) and Run (5).
+const RUN_WALK_HYSTERESIS: f32 = 0.25;
+
 /// Below this ground speed (yd/s) a streamed mover counts as standing still.
 const MOVING_EPSILON: f32 = 0.1;
 
@@ -296,7 +300,7 @@ pub(super) fn gait_candidates(
     ready: Option<u16>,
     ranged_load: Option<u16>,
 ) -> &'static [u16] {
-    claimed_candidates(state, walk_speed, ready, ranged_load)
+    claimed_candidates(state, walk_speed, ready, ranged_load, None)
         .unwrap_or_else(|| idle_fallback(state))
 }
 
@@ -327,12 +331,56 @@ pub(super) fn base_candidates(
     ranged_load: Option<u16>,
     state_anim: Option<u16>,
 ) -> BaseCands {
-    if let Some(c) = claimed_candidates(state, walk_speed, ready, ranged_load) {
+    base_candidates_with_gait(state, walk_speed, ready, ranged_load, state_anim, None)
+}
+
+/// The local animation driver passes the gait it already has armed, allowing only the Run/Walk
+/// boundary to use hysteresis. Other selectors keep the original stateless speed thresholds.
+pub(super) fn base_candidates_with_gait(
+    state: &MovementState,
+    walk_speed: f32,
+    ready: Option<u16>,
+    ranged_load: Option<u16>,
+    state_anim: Option<u16>,
+    previous_gait: Option<u16>,
+) -> BaseCands {
+    if let Some(c) = claimed_candidates(
+        state,
+        walk_speed,
+        ready,
+        ranged_load,
+        previous_gait,
+    ) {
         return BaseCands::Fixed(c);
     }
     match state_anim {
         Some(anim) => BaseCands::State([anim, STAND]),
         None => BaseCands::Fixed(idle_fallback(state)),
+    }
+}
+
+/// Ground locomotion candidates with a stable Run/Walk boundary. The public stateless
+/// selector passes no previous gait and retains the exact 1.12 threshold; the local player's
+/// animation driver passes its currently armed target and gets a ±0.25 yd/s hysteresis band.
+fn ground_gait_candidates(
+    speed: f32,
+    walk_speed: f32,
+    previous_gait: Option<u16>,
+) -> &'static [u16] {
+    if speed >= FAST_RUN_SPEED {
+        return &[143, 5, 4, 0];
+    }
+
+    let boundary = 2.0 * walk_speed;
+    let running = match previous_gait {
+        Some(4) => speed > boundary + RUN_WALK_HYSTERESIS,
+        Some(5 | 143) => speed > boundary - RUN_WALK_HYSTERESIS,
+        _ => speed > boundary,
+    };
+    if running {
+        &[5, 4, 0]
+    } else {
+        &[4, 0]
     }
 }
 
@@ -357,6 +405,7 @@ fn claimed_candidates(
     walk_speed: f32,
     ready: Option<u16>,
     ranged_load: Option<u16>,
+    previous_gait: Option<u16>,
 ) -> Option<&'static [u16]> {
     use move_flags::*;
     let f = state.flags;
@@ -388,16 +437,14 @@ fn claimed_candidates(
         return Some(&[STEALTH_WALK, 4, 0]);
     }
     // Ground gaits by live speed (`0x5fd202`/`0x5fd224`): Sprint at 11 and above, Run above twice
-    // walk, else Walk. Strafe takes these too: the reference has no ground strafe branch.
+    // walk, else Walk. The local base selector adds a narrow hysteresis band around Run/Walk so
+    // frame-to-frame stick noise cannot repeatedly restart the two clips.
     if f & ANY_MOVE != 0 {
-        let s = state.speed;
-        return Some(if s >= FAST_RUN_SPEED {
-            &[143, 5, 4, 0]
-        } else if s > 2.0 * walk_speed {
-            &[5, 4, 0]
-        } else {
-            &[4, 0]
-        });
+        return Some(ground_gait_candidates(
+            state.speed,
+            walk_speed,
+            previous_gait,
+        ));
     }
     // Turning in place: the shuffle (`0x5fd3f0`, 11 left, 12 right); the fidget gate (`0x5fce30`)
     // refuses a swimmer.

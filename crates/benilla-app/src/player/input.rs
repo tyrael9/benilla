@@ -289,9 +289,14 @@ pub(super) fn analog_move_speed_multiplier(
     player: &mut Player,
     analog: Vec2,
     dt: f32,
+    start_from_full_speed: bool,
 ) -> f32 {
-    let (next, multiplier) =
-        smooth_analog_move_magnitude(player.analog_move_magnitude, analog, dt);
+    let (next, multiplier) = smooth_analog_move_magnitude(
+        player.analog_move_magnitude,
+        analog,
+        dt,
+        start_from_full_speed,
+    );
     player.analog_move_magnitude = next;
     multiplier
 }
@@ -300,13 +305,14 @@ fn smooth_analog_move_magnitude(
     previous: Option<f32>,
     analog: Vec2,
     dt: f32,
+    start_from_full_speed: bool,
 ) -> (Option<f32>, f32) {
     if analog == Vec2::ZERO {
         return (None, 1.0);
     }
 
     let target = analog.length().clamp(0.0, 1.0);
-    let current = previous.unwrap_or(target);
+    let current = previous.unwrap_or(if start_from_full_speed { 1.0 } else { target });
     let blend = 1.0 - (-dt.max(0.0) / ANALOG_MOVE_SMOOTHING_SECONDS).exp();
     let next = current + (target - current) * blend;
     (Some(next), next)
@@ -426,18 +432,25 @@ mod tests {
     #[test]
     fn analog_speed_smoothing_filters_held_stick_changes_but_not_release() {
         let (first_state, first) =
-            smooth_analog_move_magnitude(None, Vec2::Y * 0.8, 1.0 / 60.0);
-        assert!((first - 0.8).abs() < 1e-6, "first input has no ramp-in lag");
+            smooth_analog_move_magnitude(None, Vec2::Y * 0.8, 1.0 / 60.0, false);
+        assert!((first - 0.8).abs() < 1e-6, "first input from rest has no ramp-in lag");
+
+        let (autorun_state, autorun_first) =
+            smooth_analog_move_magnitude(None, Vec2::Y * 0.8, 1.0 / 60.0, true);
+        assert!(
+            autorun_first < 1.0 && autorun_first > 0.8,
+            "taking over full-speed autorun eases toward the stick target: {autorun_first}"
+        );
 
         let (next_state, next) =
-            smooth_analog_move_magnitude(first_state, Vec2::Y * 0.7, 1.0 / 60.0);
+            smooth_analog_move_magnitude(first_state, Vec2::Y * 0.7, 1.0 / 60.0, false);
         assert!(
             next < first && next > 0.7,
             "small stick fluctuations are followed smoothly: {first} -> {next}"
         );
 
         let (released_state, released) =
-            smooth_analog_move_magnitude(next_state, Vec2::ZERO, 1.0 / 60.0);
+            smooth_analog_move_magnitude(next_state, Vec2::ZERO, 1.0 / 60.0, false);
         assert_eq!(released_state, None);
         assert_eq!(released, 1.0, "autorun resumes full speed immediately");
     }

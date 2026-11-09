@@ -300,7 +300,7 @@ pub(super) fn feed_ui_input(
     // The interface's screen on the window, 4:3 and stretched with `widescreen` 0
     // ([`super::UiScreen`]).
     let widescreen = host.widescreen();
-    let screen = super::UiScreen::of_window(window, widescreen.as_ref());
+    let screen = super::UiScreen::of_window(&window, widescreen.as_ref());
     // The window cursor in the root's y-up 768-high units, `GetCursorPosition`'s answer. The
     // headless hover probe's aim stands in for a missing cursor, so `PointerOverUi` rises and falls
     // over a panel in an automated run as for a person; a real pointer wins.

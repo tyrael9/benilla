@@ -175,35 +175,10 @@ pub fn prepare_ios_addons() {
 // Only AddOns is replaced. SavedVariables, settings, bindings, macros and other state stay put.
 #[cfg(any(target_os = "ios", test))]
 fn refresh_ios_addons(bundled: &Path, persistent: &Path) -> std::io::Result<()> {
-    let parent = persistent.parent().ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::InvalidInput, "AddOns path has no parent")
-    })?;
-    std::fs::create_dir_all(parent)?;
-    let staging = parent.join("AddOns.installing");
-    let backup = parent.join("AddOns.previous");
-    remove_path_if_exists(&staging)?;
-    copy_dir_recursive(bundled, &staging)?;
-    // Recover an interrupted earlier swap before starting another one.
-    if backup.exists() && !persistent.exists() {
-        std::fs::rename(&backup, persistent)?;
-    } else if backup.exists() && persistent.exists() {
-        remove_path_if_exists(&backup)?;
-    }
-    let had_previous = persistent.exists();
-    if had_previous {
-        std::fs::rename(persistent, &backup)?;
-    }
-    if let Err(error) = std::fs::rename(&staging, persistent) {
-        if had_previous {
-            let _ = std::fs::rename(&backup, persistent);
-        }
-        let _ = remove_path_if_exists(&staging);
-        return Err(error);
-    }
-    if had_previous {
-        remove_path_if_exists(&backup)?;
-    }
-    Ok(())
+    // Merge instead of swapping the whole root: user-installed addons not shipped in this app
+    // remain available. Files that are part of the bundled addon set are refreshed in place;
+    // SavedVariables and the rest of benilla-config live outside this tree.
+    copy_dir_recursive(bundled, persistent)
 }
 
 #[cfg(any(target_os = "ios", test))]
@@ -494,6 +469,32 @@ mod tests {
     }
 
     #[test]
+    fn refreshing_bundled_addon_files_updates_only_matching_files() {
+        let tmp = std::env::temp_dir().join(format!("benilla-ios-addon-update-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let bundled = tmp.join("bundle/AddOns/Managed");
+        let persistent = tmp.join("container/benilla-config/AddOns");
+        std::fs::create_dir_all(&bundled).unwrap();
+        std::fs::create_dir_all(persistent.join("Managed")).unwrap();
+        std::fs::create_dir_all(persistent.join("Custom")).unwrap();
+        std::fs::write(bundled.join("Managed.lua"), b"updated").unwrap();
+        std::fs::write(persistent.join("Managed/Managed.lua"), b"old").unwrap();
+        std::fs::write(persistent.join("Custom/Custom.toc"), b"custom").unwrap();
+
+        refresh_ios_addons(&tmp.join("bundle/AddOns"), &persistent).unwrap();
+
+        assert_eq!(
+            std::fs::read(persistent.join("Managed/Managed.lua")).unwrap(),
+            b"updated"
+        );
+        assert!(
+            persistent.join("Custom/Custom.toc").is_file(),
+            "custom addons absent from the bundle must survive refresh"
+        );
+        std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    #[test]
     fn failed_ios_data_bootstrap_preserves_an_existing_unmarked_directory() {
         let tmp = std::env::temp_dir().join(format!("benilla-ios-data-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
@@ -556,7 +557,10 @@ mod tests {
         std::fs::create_dir_all(bundled.join("NewAddon")).unwrap();
         std::fs::write(bundled.join("NewAddon/NewAddon.toc"), b"new").unwrap();
         refresh_ios_addons(&bundled, &persistent).unwrap();
-        assert!(!persistent.join("OldAddon").exists());
+        assert!(
+            persistent.join("OldAddon/OldAddon.toc").is_file(),
+            "an addon not bundled with this app must not be deleted"
+        );
         assert!(persistent.join("NewAddon/NewAddon.toc").is_file());
         assert_eq!(std::fs::read(&saved).unwrap(), b"player data");
         std::fs::remove_dir_all(&tmp).unwrap();

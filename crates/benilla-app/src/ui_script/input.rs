@@ -203,7 +203,7 @@ type KeyboardFeed<'w> = (
 pub(super) fn feed_ui_input(
     mut script: Option<NonSendMut<UiScript>>,
     // Carries the `wl_display` the Wayland clipboard backend needs, once winit has a surface.
-    window: Query<(&mut Window, Option<&bevy::window::RawHandleWrapper>), With<PrimaryWindow>>,
+    mut window: Query<(&mut Window, Option<&bevy::window::RawHandleWrapper>), With<PrimaryWindow>>,
     records: Res<super::InputRecords>,
     mut pointer: PointerFeed,
     mut kbd: KeyboardFeed,
@@ -256,14 +256,17 @@ pub(super) fn feed_ui_input(
     let start = walk.next;
     walk.next = records.iter().count();
     let window = window.single_mut().ok();
-    let (mut script, (mut window, raw_handle)) = match (script, window) {
+    let (mut script, (window, raw_handle)) = match (script, window) {
         (Some(script), Some((window, raw_handle))) => (script, (window, raw_handle)),
         (script, maybe_window) => {
             #[cfg(target_os = "ios")]
             if let Some((mut window, _)) = maybe_window {
+
                 // No focused FrameXML field (or no VM): do not leave UIKit's keyboard enabled.
                 window.ime_enabled = false;
             }
+            #[cfg(not(target_os = "ios"))]
+            let _ = maybe_window;
             // No VM or no window: no walk, and the world frame's binding meets every record, the VM's
             // bodies running when there is one.
             capture.typing = false;

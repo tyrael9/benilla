@@ -168,6 +168,17 @@ impl UiScript {
         .is_some()
     }
 
+    /// Whether the topmost mouse hit at `(x, y)` is an EditBox.
+    pub fn hit_test_is_editbox(&self, x: f32, y: f32) -> bool {
+        let Some(hit) = self.hit_test_frame(x, y) else {
+            return false;
+        };
+        self.model_ref()
+            .arena
+            .frame(hit)
+            .is_some_and(|frame| frame.kind == crate::widget::FrameKind::EditBox)
+    }
+
     /// The handle of the frame that captures `(x, y)`, for a caller that checks it against a
     /// handle set taken earlier (an anonymous frame has no name). Needs [`Self::resolve`] first.
     pub fn hit_test_frame(&self, x: f32, y: f32) -> Option<FrameHandle> {

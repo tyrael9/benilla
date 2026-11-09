@@ -1672,6 +1672,12 @@ impl UiScript {
             .is_some_and(|h| model.arena.frame(h).is_some_and(|f| f.effective_visible))
     }
 
+    /// Clear the current EditBox focus and fire its `OnEditFocusLost`, without changing its text.
+    /// Used by touch hosts to dismiss the software keyboard when a tap lands outside an EditBox.
+    pub fn clear_keyboard_focus(&self) -> bool {
+        editbox::clear_focused(&self.lua)
+    }
+
     /// The focused EditBox's name, unfiltered by visibility, unlike [`Self::has_keyboard_focus`].
     /// Host-side only: 1.12's EditBox table has `SetFocus`/`ClearFocus` and no getter.
     pub fn focused_editbox_name(&self) -> Option<String> {

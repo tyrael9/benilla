@@ -318,6 +318,19 @@ fn inject_touch_input(
 
         match phase {
             TouchPhase::Started => {
+                if !cinematic_playing && !startup_movie_playing {
+                    let dismiss_keyboard = script.as_deref().is_some_and(|script| {
+                        script.vm_kind() == benilla_ui::script::VmKind::Glue
+                            && script.has_keyboard_focus()
+                            && !script.hit_test_is_editbox(ui.x, ui.y)
+                    });
+                    if dismiss_keyboard {
+                        if let Some(script) = script.as_deref() {
+                            script.clear_keyboard_focus();
+                        }
+                    }
+                }
+
                 if cinematic_playing {
                     // The reference's ESC path already owns the correct fade and server ack.
                     // Consume this finger so the tap cannot also click or move the world.

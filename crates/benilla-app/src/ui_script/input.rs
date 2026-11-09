@@ -450,6 +450,7 @@ pub(super) fn feed_ui_input(
                     // (`0x765fd0`).
                     #[cfg(target_os = "ios")]
                     let software_return = ev.state == ButtonState::Pressed
+                        && reaches_ui(ev, egui_keyboard)
                         && is_ios_software_return(ev.key_code, ev.text.as_deref());
                     #[cfg(not(target_os = "ios"))]
                     let software_return = false;

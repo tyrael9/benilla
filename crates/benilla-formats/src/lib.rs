@@ -22,6 +22,8 @@ pub use install::{
     addon_corpus, addon_corpus_candidates, candidates, project_folder, set_project_folder, skipped,
     wow_data,
 };
+#[cfg(target_os = "ios")]
+pub use install::{prepare_ios_addons, prepare_ios_data};
 /// The install's loose files, asked before the archives by the opens that set the loose flag.
 mod loose;
 pub use loose::{

@@ -4,14 +4,15 @@
 //!
 //! Resolution, in order, the same shape as [`benilla_formats::wow_data`]:
 //! 1. `$BENILLA_HOME`.
-//! 2. An unattended run ([`crate::run_mode::unattended`]): a fresh folder of its own for the run,
+//! 2. The iOS app container, `Library/Application Support/Benilla/benilla-config/`.
+//! 3. An unattended run ([`crate::run_mode::unattended`]): a fresh folder of its own for the run,
 //!    under the system temp folder, so a probe neither reads the player's settings nor writes back
 //!    over them.
-//! 3. `<project folder>/benilla-config/`, dev builds only ([`benilla_formats::project_folder`], the
+//! 4. `<project folder>/benilla-config/`, dev builds only ([`benilla_formats::project_folder`], the
 //!    launcher's): a shipped binary must not carry the build machine's source tree. A linked
 //!    worktree resolves to its primary checkout's folder, unless it declares its own probe account
 //!    ([`shared_root`]).
-//! 4. `<exe dir>/benilla-config/`.
+//! 5. `<exe dir>/benilla-config/`.
 //!
 //! With `$WOW_CAPTURE` set every path resolves to `None`: a capture neither reads nor writes
 //! player state.
@@ -41,6 +42,10 @@ fn home_in(unit_test: bool) -> Option<PathBuf> {
     if unit_test {
         return None; // a unit test reaches no real state folder unless it pins `$BENILLA_HOME`
     }
+    #[cfg(target_os = "ios")]
+    {
+        return ios_home();
+    }
     if crate::run_mode::unattended() {
         return Some(run_home().to_path_buf());
     }
@@ -59,7 +64,20 @@ fn run_home_in(temp: &Path, pid: u32) -> PathBuf {
     temp.join(format!("benilla-run-{pid}")).join(STATE_DIR)
 }
 
-/// Steps 3 and 4 of [`home`]: the folder the build itself lives in.
+/// iOS keeps mutable user state in the app container, never inside the read-only bundle.
+#[cfg(any(target_os = "ios", test))]
+fn ios_home_from(home: &Path) -> PathBuf {
+    home.join("Library/Application Support/Benilla/benilla-config")
+}
+
+#[cfg(target_os = "ios")]
+fn ios_home() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .map(|home| ios_home_from(&home))
+}
+
+/// Steps 4 and 5 of [`home`]: the folder the build itself lives in.
 fn resident_home() -> Option<PathBuf> {
     // 3 · the project folder, dev builds only.
     if let Some(root) = dev_project_root() {
@@ -989,6 +1007,15 @@ mod tests {
     /// With nothing but enable files in an `addons/` that is not the AddOns root, the emptied
     /// folder goes; with `AddOns/` beside it (different folders on a case-sensitive filesystem) it
     /// goes too, and the root stays whatever its case.
+    #[test]
+    fn ios_state_uses_a_writable_application_support_directory() {
+        let home = Path::new("/var/mobile/Containers/Data/Application/example");
+        assert_eq!(
+            ios_home_from(home),
+            home.join("Library/Application Support/Benilla/benilla-config")
+        );
+    }
+
     #[test]
     fn an_emptied_old_folder_goes_unless_it_is_the_addons_root() {
         let _l = ENV_LOCK

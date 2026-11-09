@@ -274,6 +274,13 @@ fn launch(build: BuildId, extend: Option<Extension<'_>>) -> AppExit {
     // A dev build's install, state folder and probe identity resolve from the launcher's folder,
     // so a crate on top of benilla keeps them in its own and not in cargo's checkout of benilla.
     benilla_formats::set_project_folder(build.project_dir);
+    // iOS bundles are read-only; seed the writable app container before resolving
+    // WoW Data or registering the player's loose AddOns.
+    #[cfg(target_os = "ios")]
+    {
+        benilla_formats::prepare_ios_data();
+        benilla_formats::prepare_ios_addons();
+    }
     if run_mode::unattended() && std::env::var_os("BENILLA_HOME").is_none() {
         // Before the logger exists; whoever reads what the run wrote needs the folder.
         if let Some(home) = local_state::home() {

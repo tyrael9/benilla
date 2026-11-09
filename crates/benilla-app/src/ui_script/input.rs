@@ -659,7 +659,7 @@ fn hover_walk(script: &mut UiScript, at: Vec2) -> Option<u32> {
 #[cfg(any(target_os = "ios", test))]
 fn is_ios_software_return(key_code: KeyCode, text: Option<&str>) -> bool {
     !matches!(key_code, KeyCode::Enter | KeyCode::NumpadEnter)
-        && text.is_some_and(|text| matches!(text, "\\n" | "\\r" | "\\r\\n"))
+        && text.is_some_and(|text| matches!(text, "\n" | "\r" | "\r\n"))
 }
 
 /// Whether a key event reaches the UI while a dev overlay's text field may hold the keyboard: none
@@ -832,11 +832,11 @@ mod tests {
 
     #[test]
     fn ios_software_keyboard_return_is_not_inserted_as_a_character() {
-        assert!(is_ios_software_return(KeyCode::KeyA, Some("\\n")));
-        assert!(is_ios_software_return(KeyCode::KeyA, Some("\\r")));
-        assert!(is_ios_software_return(KeyCode::KeyA, Some("\\r\\n")));
-        assert!(!is_ios_software_return(KeyCode::Enter, Some("\\n")));
-        assert!(!is_ios_software_return(KeyCode::NumpadEnter, Some("\\r")));
+        assert!(is_ios_software_return(KeyCode::KeyA, Some("\n")));
+        assert!(is_ios_software_return(KeyCode::KeyA, Some("\r")));
+        assert!(is_ios_software_return(KeyCode::KeyA, Some("\r\n")));
+        assert!(!is_ios_software_return(KeyCode::Enter, Some("\n")));
+        assert!(!is_ios_software_return(KeyCode::NumpadEnter, Some("\r")));
         assert!(!is_ios_software_return(KeyCode::KeyA, Some("a")));
         assert!(!is_ios_software_return(KeyCode::KeyA, None));
     }

@@ -105,7 +105,7 @@ fn ios_config_dir(home: &Path) -> PathBuf {
 
 // Seed once. The ready marker is written only after the copied MPQ chain opens.
 // An existing unmarked directory is adopted if valid, otherwise preserved untouched.
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", test))]
 fn seed_ios_data(bundled: &Path, persistent: &Path) -> std::io::Result<()> {
     let marker = persistent.join(".benilla-ready");
     if marker.is_file() {
@@ -278,12 +278,12 @@ fn candidates_from(
         out.push(data);
     }
 
-    // 3. The project folder, dev builds only.
+    // 2. The project folder, dev builds only.
     if let Some(root) = project {
         out.push(root.join("WoW/Data"));
     }
 
-    // 4. Beside the binary; a failed `current_exe` adds nothing.
+    // 3. Beside the binary; a failed `current_exe` adds nothing.
     if let Some(dir) = exe_dir {
         out.push(dir.join("Data"));
         out.push(dir.join("WoW/Data"));
@@ -491,6 +491,37 @@ mod tests {
                 PathBuf::from("/app/Benilla.app/WoW/Data"),
             ]
         );
+    }
+
+    #[test]
+    fn failed_ios_data_bootstrap_preserves_an_existing_unmarked_directory() {
+        let tmp = std::env::temp_dir().join(format!("benilla-ios-data-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let bundled = tmp.join("bundle/Data");
+        let persistent = tmp.join("container/Library/Application Support/Benilla/Data");
+        std::fs::create_dir_all(&bundled).unwrap();
+        std::fs::write(bundled.join("not-an-mpq.txt"), b"bundle").unwrap();
+        std::fs::create_dir_all(&persistent).unwrap();
+        let existing = persistent.join("keep-me.txt");
+        std::fs::write(&existing, b"existing player data").unwrap();
+
+        let error = seed_ios_data(&bundled, &persistent).unwrap_err();
+        assert_eq!(
+            error.kind(),
+            std::io::ErrorKind::InvalidData,
+            "the invalid old directory must be reported, not silently replaced"
+        );
+        assert_eq!(
+            std::fs::read(&existing).unwrap(),
+            b"existing player data",
+            "a pre-existing directory is never removed or overwritten"
+        );
+        assert!(
+            !persistent.join(".benilla-ready").exists(),
+            "a failed import must not be marked ready"
+        );
+        assert!(!persistent.parent().unwrap().join("Data.installing").exists());
+        std::fs::remove_dir_all(&tmp).unwrap();
     }
 
     #[test]

@@ -81,7 +81,7 @@ fn ios_data_dir(home: &Path) -> PathBuf {
     ios_support_root(home).join("Data")
 }
 
-#[cfg(any(target_os = "ios", test))]
+#[cfg(test)]
 fn ios_addons_dir(home: &Path) -> PathBuf {
     ios_config_dir(home).join("AddOns")
 }

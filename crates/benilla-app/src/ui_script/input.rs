@@ -850,6 +850,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn input_feed_system_has_disjoint_primary_window_access_for_click_tracing() {
+        // InputHost::ArmTracer's PointPick reads Window. Registering the complete system
+        // validates that the feed does not also request mutable Window access.
+        let mut world = World::new();
+        let _system = world.register_system(feed_ui_input);
+    }
+
+    #[test]
     fn ios_software_keyboard_return_is_not_inserted_as_a_character() {
         assert!(is_ios_software_return(KeyCode::KeyA, Some("\n")));
         assert!(is_ios_software_return(KeyCode::KeyA, Some("\r")));

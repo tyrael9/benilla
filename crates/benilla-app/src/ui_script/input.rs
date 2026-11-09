@@ -204,7 +204,7 @@ pub(super) fn feed_ui_input(
     mut script: Option<NonSendMut<UiScript>>,
     // Keep this read-only: InputHost's ArmTracer also reads the primary Window while tracing a
     // world click. Queue the IME toggle below so this system's accesses remain disjoint.
-    _commands: Commands,
+    mut _commands: Commands,
     // Carries the `wl_display` the Wayland clipboard backend needs, once winit has a surface.
     window: Query<(Entity, &Window, Option<&bevy::window::RawHandleWrapper>), With<PrimaryWindow>>,
     records: Res<super::InputRecords>,

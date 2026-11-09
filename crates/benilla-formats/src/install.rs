@@ -87,6 +87,13 @@ fn ios_addons_dir(home: &Path) -> PathBuf {
 }
 
 #[cfg(any(target_os = "ios", test))]
+fn ios_addons_dir_with_override(home: &Path, config_dir: Option<PathBuf>) -> PathBuf {
+    config_dir
+        .unwrap_or_else(|| ios_config_dir(home))
+        .join("AddOns")
+}
+
+#[cfg(any(target_os = "ios", test))]
 fn ios_support_root(home: &Path) -> PathBuf {
     home.join("Library/Application Support/Benilla")
 }
@@ -153,9 +160,10 @@ pub fn prepare_ios_addons() {
     if !bundled.is_dir() {
         return;
     }
-    let persistent = std::env::var_os("BENILLA_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| ios_addons_dir(&home));
+    let persistent = ios_addons_dir_with_override(
+        &home,
+        std::env::var_os("BENILLA_HOME").map(PathBuf::from),
+    );
     if let Err(error) = refresh_ios_addons(&bundled, &persistent) {
         eprintln!(
             "benilla: could not refresh AddOns at {}: {error}",
@@ -458,6 +466,10 @@ mod tests {
         assert_eq!(
             ios_addons_dir(home),
             home.join("Library/Application Support/Benilla/benilla-config/AddOns")
+        );
+        assert_eq!(
+            ios_addons_dir_with_override(home, Some(PathBuf::from("/custom/config"))),
+            PathBuf::from("/custom/config/AddOns")
         );
     }
 

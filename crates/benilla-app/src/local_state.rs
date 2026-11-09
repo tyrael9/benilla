@@ -52,7 +52,7 @@ fn home_in(unit_test: bool) -> Option<PathBuf> {
     resident_home()
 }
 
-/// Step 2 of [`home`]: the unattended run's own folder, one per process, created on first write.
+/// Step 3 of [`home`]: the unattended run's own folder, one per process, created on first write.
 /// Left behind for whoever reads what the run wrote; the system cleans its temp folder.
 pub(crate) fn run_home() -> &'static Path {
     static RUN_HOME: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
@@ -79,11 +79,11 @@ fn ios_home() -> Option<PathBuf> {
 
 /// Steps 4 and 5 of [`home`]: the folder the build itself lives in.
 fn resident_home() -> Option<PathBuf> {
-    // 3 · the project folder, dev builds only.
+    // 4 · the project folder, dev builds only.
     if let Some(root) = dev_project_root() {
         return Some(root.join(STATE_DIR));
     }
-    // 4 · beside the binary; a dev build never reaches here.
+    // 5 · beside the binary; a dev build never reaches here.
     std::env::current_exe()
         .ok()
         .and_then(|e| e.parent().map(Path::to_path_buf))
@@ -1004,9 +1004,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
-    /// With nothing but enable files in an `addons/` that is not the AddOns root, the emptied
-    /// folder goes; with `AddOns/` beside it (different folders on a case-sensitive filesystem) it
-    /// goes too, and the root stays whatever its case.
     #[test]
     fn ios_state_uses_a_writable_application_support_directory() {
         let home = Path::new("/var/mobile/Containers/Data/Application/example");
@@ -1016,6 +1013,9 @@ mod tests {
         );
     }
 
+    /// With nothing but enable files in an `addons/` that is not the AddOns root, the emptied
+    /// folder goes; with `AddOns/` beside it (different folders on a case-sensitive filesystem) it
+    /// goes too, and the root stays whatever its case.
     #[test]
     fn an_emptied_old_folder_goes_unless_it_is_the_addons_root() {
         let _l = ENV_LOCK

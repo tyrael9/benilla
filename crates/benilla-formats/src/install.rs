@@ -52,7 +52,6 @@ fn benilla_checkout() -> Option<&'static Path> {
     Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2)
 }
 
-
 #[cfg(target_os = "ios")]
 pub fn prepare_ios_data() {
     let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
@@ -428,7 +427,12 @@ mod tests {
 
         // The winner depends on the build (dev puts the project folder first), so assert only
         // that it is not the ghost and exists.
-        let chosen = candidates_from(Some(ghost.clone()), None, project_folder(), Some(tmp.clone()))
+        let chosen = candidates_from(
+            Some(ghost.clone()),
+            None,
+            project_folder(),
+            Some(tmp.clone()),
+        )
             .into_iter()
             .find(|c| c.is_dir());
         assert_ne!(
@@ -514,6 +518,7 @@ mod tests {
         assert_eq!(std::fs::read(&saved).unwrap(), b"player data");
         std::fs::remove_dir_all(&tmp).unwrap();
     }
+
     #[test]
     fn an_empty_override_means_there_is_no_install() {
         assert_eq!(

@@ -45,5 +45,11 @@ jobs:
       # Same package and default features as the local release run.
       - name: Compile macOS app (default features)
         run: cargo check --release -p benilla
+      # The iOS-specific bootstrap and state paths are cfg-gated and are invisible to
+      # the desktop build above, so type-check the actual player target as well.
+      - name: Install iOS Rust target
+        run: rustup target add aarch64-apple-ios
+      - name: Compile iOS player (no default features)
+        run: cargo check --release --no-default-features -p benilla --target aarch64-apple-ios
       - name: Show compiler cache stats
         run: sccache --show-stats

@@ -202,8 +202,11 @@ type KeyboardFeed<'w> = (
 #[allow(clippy::too_many_arguments)]
 pub(super) fn feed_ui_input(
     mut script: Option<NonSendMut<UiScript>>,
+    // Keep this read-only: InputHost's ArmTracer also reads the primary Window while tracing a
+    // world click. Queue the IME toggle below so this system's accesses remain disjoint.
+    _commands: Commands,
     // Carries the `wl_display` the Wayland clipboard backend needs, once winit has a surface.
-    mut window: Query<(&mut Window, Option<&bevy::window::RawHandleWrapper>), With<PrimaryWindow>>,
+    window: Query<(Entity, &Window, Option<&bevy::window::RawHandleWrapper>), With<PrimaryWindow>>,
     records: Res<super::InputRecords>,
     mut pointer: PointerFeed,
     mut kbd: KeyboardFeed,
@@ -255,15 +258,14 @@ pub(super) fn feed_ui_input(
     }
     let start = walk.next;
     walk.next = records.iter().count();
-    let window = window.single_mut().ok();
-    let (mut script, (mut window, raw_handle)) = match (script, window) {
-        (Some(script), Some((window, raw_handle))) => (script, (window, raw_handle)),
+    let window = window.single().ok();
+    let (mut script, (window_entity, window, raw_handle)) = match (script, window) {
+        (Some(script), Some((entity, window, raw_handle))) => (script, (entity, window, raw_handle)),
         (script, maybe_window) => {
             #[cfg(target_os = "ios")]
-            if let Some((mut window, _)) = maybe_window {
-
+            if let Some((entity, window, _)) = maybe_window {
                 // No focused FrameXML field (or no VM): do not leave UIKit's keyboard enabled.
-                window.ime_enabled = false;
+                queue_ime_enabled(&mut _commands, entity, window, false);
             }
             #[cfg(not(target_os = "ios"))]
             let _ = maybe_window;
@@ -303,7 +305,7 @@ pub(super) fn feed_ui_input(
     // The interface's screen on the window, 4:3 and stretched with `widescreen` 0
     // ([`super::UiScreen`]).
     let widescreen = host.widescreen();
-    let screen = super::UiScreen::of_window(&window, widescreen.as_ref());
+    let screen = super::UiScreen::of_window(window, widescreen.as_ref());
     // The window cursor in the root's y-up 768-high units, `GetCursorPosition`'s answer. The
     // headless hover probe's aim stands in for a missing cursor, so `PointerOverUi` rises and falls
     // over a panel in an automated run as for a person; a real pointer wins.
@@ -570,9 +572,22 @@ pub(super) fn feed_ui_input(
     // Keep this synchronized with the same focus gate used to capture game bindings; the
     // record walk above may have just focused or blurred a FrameXML EditBox.
     #[cfg(target_os = "ios")]
-    {
-        window.ime_enabled = capture.typing;
+    queue_ime_enabled(&mut _commands, window_entity, window, capture.typing);
+}
+
+/// Queue an IME toggle after this system's immutable Window reads and world-click trace have ended.
+/// An immediate `Query<&mut Window>` conflicts with `PointPick`'s `Query<&Window>` inside
+/// `InputHost::ArmTracer`, even though the tracer only lends during a world-click call.
+#[cfg(target_os = "ios")]
+fn queue_ime_enabled(commands: &mut Commands, entity: Entity, window: &Window, enabled: bool) {
+    if window.ime_enabled == enabled {
+        return;
     }
+    commands.queue(move |world: &mut World| {
+        if let Some(mut window) = world.get_mut::<Window>(entity) {
+            window.ime_enabled = enabled;
+        }
+    });
 }
 
 /// The press `r` hands the mouse commands its binding runs: its point, and whether the frame's

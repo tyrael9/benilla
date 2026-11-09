@@ -102,8 +102,9 @@ screen, which remembers it. Credentials go in at the login screen, or set `WOW_U
 to skip it.
 
 Settings, screenshots and addons live in `benilla-config/` at the repo root: a 1.12 addon goes in
-`benilla-config/AddOns/`. [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) has the rest, from the
-player build to the tests.
+`benilla-config/AddOns/`. The iOS app keeps these in its persistent container; see
+[`docs/ios-persistent-install.md`](docs/ios-persistent-install.md) for first-install and update steps.
+[`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) has the rest, from the player build to the tests.
 
 ## Contributing
 

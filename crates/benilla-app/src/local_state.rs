@@ -46,10 +46,13 @@ fn home_in(unit_test: bool) -> Option<PathBuf> {
     {
         return ios_home();
     }
-    if crate::run_mode::unattended() {
-        return Some(run_home().to_path_buf());
+    #[cfg(not(target_os = "ios"))]
+    {
+        if crate::run_mode::unattended() {
+            return Some(run_home().to_path_buf());
+        }
+        resident_home()
     }
-    resident_home()
 }
 
 /// Step 3 of [`home`]: the unattended run's own folder, one per process, created on first write.

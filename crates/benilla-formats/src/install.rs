@@ -103,22 +103,35 @@ fn ios_config_dir(home: &Path) -> PathBuf {
     ios_support_root(home).join("benilla-config")
 }
 
-// Seed once. The ready marker is written only after the copied MPQ chain opens.
-// An existing unmarked directory is adopted if valid, otherwise preserved untouched.
+// The ready marker means the persistent tree was bootstrapped, not that it should
+// forever ignore newer files bundled by an app update. Merge changed and new packaged files,
+// preserving files not shipped by this app; the MPQs are copied only when their size or mtime
+// changes. The marker is written only after the resulting patch chain opens.
 #[cfg(any(target_os = "ios", test))]
 fn seed_ios_data(bundled: &Path, persistent: &Path) -> std::io::Result<()> {
     let marker = persistent.join(".benilla-ready");
-    if marker.is_file() {
-        return Ok(());
-    }
+    let ready = marker.is_file();
     if persistent.is_dir() {
-        if crate::Chain::open(persistent).is_ok() {
-            return std::fs::write(marker, b"ready\n");
+        // An unmarked directory may be an older user's partial install. Adopt it only if it is
+        // already a readable chain; never merge into (or destroy) an invalid pre-existing tree.
+        if !ready && crate::Chain::open(persistent).is_err() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "an existing unmarked Data directory is not a readable patch chain; leaving it untouched",
+            ));
         }
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "an existing unmarked Data directory is not a readable patch chain; leaving it untouched",
-        ));
+        refresh_ios_data(bundled, persistent)?;
+        crate::Chain::open(persistent).map_err(|error| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("the refreshed persistent Data directory is not a readable patch chain: {error:#}"),
+            )
+        })?;
+        return if ready {
+            Ok(())
+        } else {
+            std::fs::write(marker, b"ready\n")
+        };
     }
     let parent = persistent.parent().ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::InvalidInput, "Data path has no parent")
@@ -126,7 +139,7 @@ fn seed_ios_data(bundled: &Path, persistent: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(parent)?;
     let staging = parent.join("Data.installing");
     remove_path_if_exists(&staging)?;
-    if let Err(error) = copy_dir_recursive(bundled, &staging) {
+    if let Err(error) = refresh_ios_data(bundled, &staging) {
         let _ = remove_path_if_exists(&staging);
         return Err(error);
     }
@@ -141,8 +154,75 @@ fn seed_ios_data(bundled: &Path, persistent: &Path) -> std::io::Result<()> {
         let _ = remove_path_if_exists(&staging);
         return Err(error);
     }
-    // If this write fails, the next launch validates the promoted directory and writes it.
+    // If this write fails, the next launch validates and refreshes the promoted directory.
     std::fs::write(marker, b"ready\n")
+}
+
+/// Merge the package's Data files into the writable copy, without deleting local extras.
+#[cfg(any(target_os = "ios", test))]
+fn refresh_ios_data(bundled: &Path, persistent: &Path) -> std::io::Result<()> {
+    sync_data_tree(bundled, persistent)
+}
+
+/// Copy a Data tree incrementally. Source modification times are retained on copied files so
+/// the next app launch can skip unchanged MPQs rather than copying gigabytes again.
+#[cfg(any(target_os = "ios", test))]
+fn sync_data_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if from.is_dir() {
+            sync_data_tree(&from, &to)?;
+        } else {
+            copy_data_file_if_changed(&from, &to)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(any(target_os = "ios", test))]
+fn copy_data_file_if_changed(from: &Path, to: &Path) -> std::io::Result<()> {
+    let source = std::fs::metadata(from)?;
+    if let Ok(existing) = std::fs::metadata(to) {
+        if source.len() == existing.len()
+            && source
+                .modified()
+                .ok()
+                .is_some_and(|modified| existing.modified().ok() == Some(modified))
+        {
+            return Ok(());
+        }
+    } else if let Err(error) = std::fs::metadata(to) {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            return Err(error);
+        }
+    }
+
+    let parent = to.parent().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "Data file path has no parent")
+    })?;
+    std::fs::create_dir_all(parent)?;
+    let name = to
+        .file_name()
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "Data file has no name"))?;
+    let staging = parent.join(format!(".{}.benilla-sync", name.to_string_lossy()));
+    remove_path_if_exists(&staging)?;
+
+    let result = (|| {
+        std::fs::copy(from, &staging)?;
+        if let Ok(modified) = source.modified() {
+            std::fs::File::open(&staging)?.set_times(std::fs::FileTimes::new().set_modified(modified))?;
+        }
+        // On iOS this replaces one file atomically; an interrupted copy never truncates the
+        // previously usable archive or loose file.
+        std::fs::rename(&staging, to)
+    })();
+    if result.is_err() {
+        let _ = remove_path_if_exists(&staging);
+    }
+    result
 }
 
 #[cfg(target_os = "ios")]
@@ -491,6 +571,54 @@ mod tests {
             persistent.join("Custom/Custom.toc").is_file(),
             "custom addons absent from the bundle must survive refresh"
         );
+        std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    #[test]
+    fn refreshing_bundled_data_updates_changed_files_adds_missing_files_and_preserves_extras() {
+        use std::time::{Duration, UNIX_EPOCH};
+
+        let tmp = std::env::temp_dir().join(format!("benilla-ios-data-refresh-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let bundled = tmp.join("bundle/Data");
+        let persistent = tmp.join("container/Data");
+        std::fs::create_dir_all(&bundled).unwrap();
+        std::fs::create_dir_all(&persistent).unwrap();
+
+        let bundled_eula = bundled.join("eula.html");
+        let bundled_tos = bundled.join("tos.html");
+        let old_eula = persistent.join("eula.html");
+        let local_extra = persistent.join("player-local.txt");
+        std::fs::write(&bundled_eula, b"new agreement").unwrap();
+        std::fs::write(&bundled_tos, b"new terms").unwrap();
+        std::fs::write(&old_eula, b"old agreement").unwrap();
+        std::fs::write(&local_extra, b"keep this").unwrap();
+
+        let older = UNIX_EPOCH + Duration::from_secs(10);
+        let newer = UNIX_EPOCH + Duration::from_secs(20);
+        std::fs::File::open(&bundled_eula)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(newer))
+            .unwrap();
+        std::fs::File::open(&old_eula)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(older))
+            .unwrap();
+
+        refresh_ios_data(&bundled, &persistent).unwrap();
+        assert_eq!(std::fs::read(&old_eula).unwrap(), b"new agreement");
+        assert_eq!(std::fs::read(persistent.join("tos.html")).unwrap(), b"new terms");
+        assert_eq!(std::fs::read(&local_extra).unwrap(), b"keep this");
+        assert_eq!(
+            std::fs::metadata(&old_eula).unwrap().modified().unwrap(),
+            newer,
+            "the source mtime is retained so the next update can skip the file"
+        );
+        // A second merge is idempotent and leaves user-added files alone.
+        refresh_ios_data(&bundled, &persistent).unwrap();
+        assert_eq!(std::fs::read(&old_eula).unwrap(), b"new agreement");
+        assert_eq!(std::fs::read(&local_extra).unwrap(), b"keep this");
+
         std::fs::remove_dir_all(&tmp).unwrap();
     }
 

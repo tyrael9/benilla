@@ -25,8 +25,8 @@ From the repository root on the Mac:
 
 ```sh
 IOS_BUNDLE_DATA=1 \
-WOW_DATA=/Users/zhui/wow/classic_alt/Data \
-IOS_BUNDLE_ADDONS=/Users/zhui/wow/benilla/benilla-config/AddOns \
+WOW_DATA=/path/to/WoW/Data \
+IOS_BUNDLE_ADDONS=/path/to/benilla-config/AddOns \
 IOS_INSTALL=1 \
 bash scripts/ios-package.sh
 ```
@@ -44,7 +44,7 @@ app finds the persistent copy automatically.
 When you want to update bundled addons too, keep `IOS_BUNDLE_ADDONS` set:
 
 ```sh
-IOS_BUNDLE_ADDONS=/Users/zhui/wow/benilla/benilla-config/AddOns \
+IOS_BUNDLE_ADDONS=/path/to/benilla-config/AddOns \
 IOS_INSTALL=1 \
 bash scripts/ios-package.sh
 ```

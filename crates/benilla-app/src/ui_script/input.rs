@@ -259,7 +259,7 @@ pub(super) fn feed_ui_input(
     let start = walk.next;
     walk.next = records.iter().count();
     let window = window.single().ok();
-    let (mut script, (window_entity, window, raw_handle)) = match (script, window) {
+    let (mut script, (_window_entity, window, raw_handle)) = match (script, window) {
         (Some(script), Some((entity, window, raw_handle))) => (script, (entity, window, raw_handle)),
         (script, maybe_window) => {
             #[cfg(target_os = "ios")]
@@ -572,7 +572,7 @@ pub(super) fn feed_ui_input(
     // Keep this synchronized with the same focus gate used to capture game bindings; the
     // record walk above may have just focused or blurred a FrameXML EditBox.
     #[cfg(target_os = "ios")]
-    queue_ime_enabled(&mut _commands, window_entity, window, capture.typing);
+    queue_ime_enabled(&mut _commands, _window_entity, window, capture.typing);
 }
 
 /// Queue an IME toggle after this system's immutable Window reads and world-click trace have ended.

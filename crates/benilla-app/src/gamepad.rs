@@ -150,8 +150,8 @@ struct TouchGestureState {
     ui_pointer: Option<Vec2>,
     clear_world_pointer_next: bool,
     clear_ui_pointer_next: bool,
-    /// A finger that began during a cinematic is consumed until it lifts.
-    cinematic_touch: Option<u64>,
+    /// A finger that began on a skippable cinematic or startup movie is consumed until it lifts.
+    skip_touch: Option<u64>,
 }
 
 fn touch_stick_contains(point: Vec2, centre: Vec2, radius: f32) -> bool {
@@ -175,6 +175,14 @@ fn touch_stick_axes(point: Vec2, centre: Vec2, travel: f32) -> Vec2 {
 
 fn touch_look_started_drag(start: Vec2, current: Vec2) -> bool {
     start.distance_squared(current) >= 64.0
+}
+
+/// The startup's glue MovieFrame: tapping anywhere hides it through its own OnHide path.
+fn startup_movie_visible(script: Option<&UiScript>) -> bool {
+    script.is_some_and(|script| {
+        script.vm_kind() == benilla_ui::script::VmKind::Glue
+            && script.frame_visible("MovieFrame")
+    })
 }
 
 /// Translates touch into the same ordered input records as a mouse. Touch look remains a camera
@@ -201,6 +209,7 @@ fn inject_touch_input(
 
     let state = state.get_for(script.as_deref());
     let cinematic_playing = cinematic.as_deref().is_some_and(|cine| cine.is_playing());
+    let startup_movie_playing = startup_movie_visible(script.as_deref());
     let Ok(window) = window.single() else {
         return;
     };
@@ -312,9 +321,20 @@ fn inject_touch_input(
                 if cinematic_playing {
                     // The reference's ESC path already owns the correct fade and server ack.
                     // Consume this finger so the tap cannot also click or move the world.
-                    state.cinematic_touch = Some(id);
+                    state.skip_touch = Some(id);
                     if let Some(posts) = posts.as_deref() {
                         posts.post_stop_cinematic();
+                    }
+                } else if startup_movie_playing {
+                    // MovieFrame's OnHide stops playback and returns to the login screen, exactly
+                    // the Lua path used by Escape. Consume the finger through lift to avoid a click.
+                    state.skip_touch = Some(id);
+                    if let Some(script) = script.as_deref() {
+                        if let Err(error) = script.run("MovieFrame:Hide()") {
+                            warn!("movie: iOS tap could not skip startup movie: {error}");
+                        } else {
+                            info!("movie: startup movie skipped by touch");
+                        }
                     }
                 } else if claim_move {
                     state.move_id = Some(id);
@@ -345,7 +365,7 @@ fn inject_touch_input(
                     state.world_pointer = Some(raw);
                 }
             }
-            TouchPhase::Moved if state.cinematic_touch == Some(id) => {}
+            TouchPhase::Moved if state.skip_touch == Some(id) => {}
             TouchPhase::Moved if state.move_id == Some(id) => {
                 state.move_axis = touch_stick_axes(ui, centre, stick.3);
             }
@@ -385,8 +405,8 @@ fn inject_touch_input(
                 state.world_pointer = Some(raw);
                 state.world = Some(gesture);
             }
-            TouchPhase::Ended | TouchPhase::Canceled if state.cinematic_touch == Some(id) => {
-                state.cinematic_touch = None;
+            TouchPhase::Ended | TouchPhase::Canceled if state.skip_touch == Some(id) => {
+                state.skip_touch = None;
             }
             TouchPhase::Ended | TouchPhase::Canceled if state.move_id == Some(id) => {
                 state.move_id = None;
@@ -472,7 +492,7 @@ fn inject_touch_input(
     snapshot.touch_world_pointer = state.world_pointer;
     snapshot.touch_look_active |= state.world.is_some_and(|gesture| gesture.dragging);
 
-    let touch_owns_pointer = state.cinematic_touch.is_some()
+    let touch_owns_pointer = state.skip_touch.is_some()
         || state.move_id.is_some()
         || state.ui.is_some()
         || state.world.is_some()
@@ -1416,6 +1436,28 @@ mod tests {
         assert!(!touch_stick_claim_allowed(
             true, false, true, point, centre, 112.0
         ));
+    }
+
+    #[test]
+    fn startup_movie_skip_is_only_armed_for_a_visible_glue_movie() {
+        let mut glue = UiScript::new_glue().expect("glue script");
+        glue.run(
+            r#"MovieFrame = CreateFrame("Frame", "MovieFrame") MovieFrame:Show()"#,
+        )
+        .unwrap();
+        assert!(startup_movie_visible(Some(&glue)));
+        glue.run("MovieFrame:Hide()").unwrap();
+        assert!(!startup_movie_visible(Some(&glue)));
+
+        let mut player = UiScript::new().expect("player script");
+        player
+            .run(r#"MovieFrame = CreateFrame("Frame", "MovieFrame") MovieFrame:Show()"#)
+            .unwrap();
+        assert!(
+            !startup_movie_visible(Some(&player)),
+            "a same-named in-world frame must not be treated as the startup movie"
+        );
+        assert!(!startup_movie_visible(None));
     }
 
     #[test]

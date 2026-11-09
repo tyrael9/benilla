@@ -172,7 +172,7 @@ pub fn prepare_ios_addons() {
     }
 }
 
-// Only AddOns is replaced. SavedVariables, settings, bindings, macros and other state stay put.
+// Merge the app-shipped AddOns into the persistent root; unrelated addons and player state stay put.
 #[cfg(any(target_os = "ios", test))]
 fn refresh_ios_addons(bundled: &Path, persistent: &Path) -> std::io::Result<()> {
     // Merge instead of swapping the whole root: user-installed addons not shipped in this app
@@ -543,7 +543,7 @@ mod tests {
     }
 
     #[test]
-    fn refreshing_ios_addons_replaces_only_the_addon_tree() {
+    fn refreshing_ios_addons_preserves_saved_variables_and_unbundled_addons() {
         let tmp = std::env::temp_dir().join(format!("benilla-ios-addons-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         let home = tmp.join("Library/Application Support/Benilla/benilla-config");

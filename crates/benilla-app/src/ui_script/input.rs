@@ -256,7 +256,7 @@ pub(super) fn feed_ui_input(
     let start = walk.next;
     walk.next = records.iter().count();
     let window = window.single_mut().ok();
-    let (mut script, (window, raw_handle)) = match (script, window) {
+    let (mut script, (mut window, raw_handle)) = match (script, window) {
         (Some(script), Some((window, raw_handle))) => (script, (window, raw_handle)),
         (script, maybe_window) => {
             #[cfg(target_os = "ios")]

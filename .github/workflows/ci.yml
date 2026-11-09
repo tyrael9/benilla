@@ -47,8 +47,9 @@ jobs:
         run: cargo check --release -p benilla
       # This system is registered from the input-record dispatcher at runtime. Keep
       # its custom disjoint SystemParam access check under test, not just type checking.
+      # The suite uses debug_assertions-gated census helpers even in this release-profile job.
       - name: Test input system parameter access
-        run: cargo test --release --no-default-features -p benilla-app --lib ui_script::input::tests::input_feed_system_has_disjoint_primary_window_access_for_click_tracing
+        run: CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true cargo test --release --no-default-features -p benilla-app --lib ui_script::input::tests::input_feed_system_has_disjoint_primary_window_access_for_click_tracing
       # The iOS-specific bootstrap and state paths are cfg-gated and are invisible to
       # the desktop build above, so type-check the actual player target as well.
       - name: Install iOS Rust target

@@ -203,7 +203,7 @@ type KeyboardFeed<'w> = (
 pub(super) fn feed_ui_input(
     mut script: Option<NonSendMut<UiScript>>,
     // Carries the `wl_display` the Wayland clipboard backend needs, once winit has a surface.
-    window: Query<(&Window, Option<&bevy::window::RawHandleWrapper>), With<PrimaryWindow>>,
+    window: Query<(&mut Window, Option<&bevy::window::RawHandleWrapper>), With<PrimaryWindow>>,
     records: Res<super::InputRecords>,
     mut pointer: PointerFeed,
     mut kbd: KeyboardFeed,
@@ -255,10 +255,15 @@ pub(super) fn feed_ui_input(
     }
     let start = walk.next;
     walk.next = records.iter().count();
-    let window = window.single().ok();
-    let (mut script, (window, raw_handle)) = match (script, window) {
-        (Some(script), Some(window)) => (script, window),
-        (script, _) => {
+    let window = window.single_mut().ok();
+    let (mut script, (mut window, raw_handle)) = match (script, window) {
+        (Some(script), Some((window, raw_handle))) => (script, (window, raw_handle)),
+        (script, maybe_window) => {
+            #[cfg(target_os = "ios")]
+            if let Some((mut window, _)) = maybe_window {
+                // No focused FrameXML field (or no VM): do not leave UIKit's keyboard enabled.
+                window.ime_enabled = false;
+            }
             // No VM or no window: no walk, and the world frame's binding meets every record, the VM's
             // bodies running when there is one.
             capture.typing = false;
@@ -443,26 +448,46 @@ pub(super) fn feed_ui_input(
                     // and the characters go to `char_input`, a walk of its own. A repeat goes to
                     // the frame that took the press instead (`0x766070`), a release likewise
                     // (`0x765fd0`).
-                    let walk = if reaches_ui(ev, egui_keyboard) {
-                        feed_key(
-                            script,
-                            capture,
-                            ev,
-                            &mut pressed,
-                            releases,
-                            mods,
-                            &layout,
-                            clipboard,
-                            wl_display,
-                        )
+                    #[cfg(target_os = "ios")]
+                    let software_return = ev.state == ButtonState::Pressed
+                        && is_ios_software_return(ev.key_code, ev.text.as_deref());
+                    #[cfg(not(target_os = "ios"))]
+                    let software_return = false;
+
+                    if software_return {
+                        // Some iOS software-keyboard layouts report Return as text rather than
+                        // a physical Enter key code. Route it through FrameXML's ENTER walk so
+                        // ChatFrameEditBox.OnEnterPressed sends the message instead of inserting
+                        // a newline into a single-line field.
+                        script.key_down("ENTER");
+                        capture.consumed.push(ev.key_code);
+                        verdict = crate::bindings::KeyVerdict {
+                            typing: capture.typing,
+                            arrows_fall_through: capture.arrows_fall_through,
+                            eaten: true,
+                        };
                     } else {
-                        KeyWalk::Declined
-                    };
-                    verdict = crate::bindings::KeyVerdict {
-                        typing: capture.typing,
-                        arrows_fall_through: capture.arrows_fall_through,
-                        eaten: walk != KeyWalk::Declined,
-                    };
+                        let walk = if reaches_ui(ev, egui_keyboard) {
+                            feed_key(
+                                script,
+                                capture,
+                                ev,
+                                &mut pressed,
+                                releases,
+                                mods,
+                                &layout,
+                                clipboard,
+                                wl_display,
+                            )
+                        } else {
+                            KeyWalk::Declined
+                        };
+                        verdict = crate::bindings::KeyVerdict {
+                            typing: capture.typing,
+                            arrows_fall_through: capture.arrows_fall_through,
+                            eaten: walk != KeyWalk::Declined,
+                        };
+                    }
                 }
             }
             // A right press the world frame may take stops here for its hook, which runs ahead of
@@ -536,6 +561,14 @@ pub(super) fn feed_ui_input(
         }
     };
     host.lend(&mut script, feed);
+
+    // Bevy's iOS winit view presents UIKit's software keyboard only while IME is enabled.
+    // Keep this synchronized with the same focus gate used to capture game bindings; the
+    // record walk above may have just focused or blurred a FrameXML EditBox.
+    #[cfg(target_os = "ios")]
+    {
+        window.ime_enabled = capture.typing;
+    }
 }
 
 /// The press `r` hands the mouse commands its binding runs: its point, and whether the frame's
@@ -620,6 +653,13 @@ fn hover_walk(script: &mut UiScript, at: Vec2) -> Option<u32> {
         }
     }
     hovered
+}
+
+/// Whether iOS reported the software keyboard's Return action as a newline text event.
+#[cfg(any(target_os = "ios", test))]
+fn is_ios_software_return(key_code: KeyCode, text: Option<&str>) -> bool {
+    !matches!(key_code, KeyCode::Enter | KeyCode::NumpadEnter)
+        && text.is_some_and(|text| matches!(text, "\\n" | "\\r" | "\\r\\n"))
 }
 
 /// Whether a key event reaches the UI while a dev overlay's text field may hold the keyboard: none
@@ -789,6 +829,17 @@ pub(crate) fn feed_key(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ios_software_keyboard_return_is_not_inserted_as_a_character() {
+        assert!(is_ios_software_return(KeyCode::KeyA, Some("\\n")));
+        assert!(is_ios_software_return(KeyCode::KeyA, Some("\\r")));
+        assert!(is_ios_software_return(KeyCode::KeyA, Some("\\r\\n")));
+        assert!(!is_ios_software_return(KeyCode::Enter, Some("\\n")));
+        assert!(!is_ios_software_return(KeyCode::NumpadEnter, Some("\\r")));
+        assert!(!is_ios_software_return(KeyCode::KeyA, Some("a")));
+        assert!(!is_ios_software_return(KeyCode::KeyA, None));
+    }
 
     fn wheel_pane() -> UiScript {
         let mut s = UiScript::new().unwrap();

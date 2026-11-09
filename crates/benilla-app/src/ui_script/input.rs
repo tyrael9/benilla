@@ -854,7 +854,10 @@ mod tests {
         // InputHost::ArmTracer's PointPick reads Window. Registering the complete system
         // validates that the feed does not also request mutable Window access.
         let mut world = World::new();
-        let _system = world.register_system(feed_ui_input);
+        let system = world.register_system(feed_ui_input);
+        // Initialization performs the access census. With an empty world the later parameter
+        // validation can fail; that is expected and unrelated to the conflict this test guards.
+        let _ = world.run_system(system);
     }
 
     #[test]

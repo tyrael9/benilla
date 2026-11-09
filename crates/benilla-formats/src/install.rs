@@ -185,35 +185,36 @@ fn sync_data_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
 #[cfg(any(target_os = "ios", test))]
 fn copy_data_file_if_changed(from: &Path, to: &Path) -> std::io::Result<()> {
     let source = std::fs::metadata(from)?;
-    if let Ok(existing) = std::fs::metadata(to) {
-        if source.len() == existing.len()
-            && source
-                .modified()
-                .ok()
-                .is_some_and(|modified| existing.modified().ok() == Some(modified))
+    match std::fs::metadata(to) {
+        Ok(existing)
+            if source.len() == existing.len()
+                && source
+                    .modified()
+                    .ok()
+                    .is_some_and(|modified| existing.modified().ok() == Some(modified)) =>
         {
             return Ok(());
         }
-    } else if let Err(error) = std::fs::metadata(to) {
-        if error.kind() != std::io::ErrorKind::NotFound {
-            return Err(error);
-        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
     }
 
     let parent = to.parent().ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::InvalidInput, "Data file path has no parent")
     })?;
     std::fs::create_dir_all(parent)?;
-    let name = to
-        .file_name()
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "Data file has no name"))?;
+    let name = to.file_name().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "Data file has no name")
+    })?;
     let staging = parent.join(format!(".{}.benilla-sync", name.to_string_lossy()));
     remove_path_if_exists(&staging)?;
 
     let result = (|| {
         std::fs::copy(from, &staging)?;
         if let Ok(modified) = source.modified() {
-            std::fs::File::open(&staging)?.set_times(std::fs::FileTimes::new().set_modified(modified))?;
+            std::fs::File::open(&staging)?
+                .set_times(std::fs::FileTimes::new().set_modified(modified))?;
         }
         // On iOS this replaces one file atomically; an interrupted copy never truncates the
         // previously usable archive or loose file.

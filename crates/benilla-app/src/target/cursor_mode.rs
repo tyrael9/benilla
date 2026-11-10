@@ -465,14 +465,24 @@ fn highlightable_flags(
     }
     // The faction term (`0x5f3026`): the GameObject's reaction toward us must beat hostile. An
     // unresolved reaction passes, so a data gap never blanks the world.
-    let ordinary_faction_ok = |r: Option<u8>| r.is_none_or(|r| r > 1);
-    if type_id == GO_TYPE_TRAP {
-        // TRAP inverts it (`0x5f2fc6`): highlightable only to whoever it is hostile to.
-        if !reaction.is_none_or(|r| r == 1) {
+    //
+    // A FISHINGNODE is different: its per-type override is the exact
+    // UNIT_FIELD_CHANNEL_OBJECT == this GO check. That already establishes that the bobber belongs
+    // to the active player's cast. Its template carries a fixed player-side faction, which can
+    // look hostile to a Horde character; applying the ordinary static-template faction gate after
+    // the owner check would therefore make the player's own bobber un-hoverable and unusable.
+    // Keep the shared GO flag/quest gates below, but do not apply this unrelated faction test.
+    let owned_fishing_node = type_id == GO_TYPE_FISHINGNODE && overrides.channel_owned;
+    if !owned_fishing_node {
+        let ordinary_faction_ok = |r: Option<u8>| r.is_none_or(|r| r > 1);
+        if type_id == GO_TYPE_TRAP {
+            // TRAP inverts it (`0x5f2fc6`): highlightable only to whoever it is hostile to.
+            if !reaction.is_none_or(|r| r == 1) {
+                return false;
+            }
+        } else if !ordinary_faction_ok(reaction) {
             return false;
         }
-    } else if !ordinary_faction_ok(reaction) {
-        return false;
     }
     if flags & GO_FLAG_IN_USE_OR_NO_INTERACT != 0 {
         return false;
@@ -1413,7 +1423,7 @@ mod tests {
             GO_TYPE_FISHINGNODE,
             0,
             0,
-            None,
+            Some(1), // the fixed player-side template faction is hostile to Horde
             GoOverrides {
                 channel_owned: true,
                 ..Default::default()
@@ -1450,7 +1460,7 @@ mod tests {
             0,
             0,
             None,
-            None,
+            Some(1),
             GoOverrides {
                 channel_owned: true,
                 ..Default::default()

@@ -134,6 +134,16 @@ pub(crate) struct BindingLatches {
     down: KeyDownList,
 }
 
+impl BindingLatches {
+    /// The stock SITORSTAND binding is press-only, but swimming reads it as a held downward axis.
+    /// Derive the hold from physical binding latches so every binding and release path stays exact.
+    pub(crate) fn sit_or_stand_down(&self) -> bool {
+        self.latched
+            .iter()
+            .any(|(_, command)| command.eq_ignore_ascii_case("SITORSTAND"))
+    }
+}
+
 /// The keys believed down, the reference's own list (`0x4248b3`): a press of a key on it is an
 /// auto-repeat, whatever the OS flagged. One instance is the bindings', another the UI key feed's
 /// ([`crate::ui_script`]), which decides repeat for the frames by the same rule and reconcile.
@@ -1161,6 +1171,24 @@ fn release(state: &mut BindingLatches, mut script: Option<&mut UiScript>, key: H
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn sit_or_stand_down_tracks_all_matching_physical_binding_latches() {
+        let mut latches = super::BindingLatches::default();
+        let first = super::Held::Key(bevy::prelude::KeyCode::KeyX);
+        let second = super::Held::Key(bevy::prelude::KeyCode::KeyY);
+        latches.latched.push((first, "SITORSTAND".into()));
+        latches.latched.push((second, "sitorstand".into()));
+        latches
+            .latched
+            .push((super::Held::Key(bevy::prelude::KeyCode::KeyZ), "JUMP".into()));
+
+        assert!(latches.sit_or_stand_down());
+        latches.latched.retain(|(key, _)| *key != first);
+        assert!(latches.sit_or_stand_down(), "the second bound key is still held");
+        latches.latched.retain(|(key, _)| *key != second);
+        assert!(!latches.sit_or_stand_down());
+    }
+
     use bevy::input::keyboard::{Key, KeyboardInput};
     use bevy::input::mouse::MouseButtonInput;
 

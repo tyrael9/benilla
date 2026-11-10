@@ -315,8 +315,11 @@ pub(super) fn control(
         Res<view_subject::FarSight>,
         // The pitch latch the calls left, which the frame's writes of the latch supersede.
         Option<ResMut<super::press::CallPitch>>,
-        // The current normalized gamepad snapshot, read only by the input phase.
-        Res<crate::gamepad::GamepadSnapshot>,
+        // Platform input and the physical legacy SITORSTAND binding hold.
+        (
+            Res<crate::gamepad::GamepadSnapshot>,
+            Res<crate::bindings::BindingLatches>,
+        ),
     ),
     mut commands: Commands,
     mut player: ResMut<Player>,
@@ -366,7 +369,8 @@ pub(super) fn control(
         &speed_capsule.3,
     );
     let binds = &speed_capsule.4;
-    let gamepad = &speed_capsule.14;
+    let gamepad = &speed_capsule.14.0;
+    let binding_latches = &speed_capsule.14.1;
     let view_subject = &speed_capsule.5;
     let self_guid = speed_capsule.6 .0;
     let scoped = &speed_capsule.7;
@@ -922,6 +926,7 @@ pub(super) fn control(
                 surface_y,
                 (move_fwd, move_right),
                 (swim_fwd, swim_side),
+                swimming && may_translate && binding_latches.sit_or_stand_down(),
                 mover_speeds,
                 move_speed,
                 if translating { drunk_wobble } else { 0.0 },

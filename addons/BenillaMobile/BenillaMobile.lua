@@ -348,11 +348,33 @@ local function UpdateTouchStickVisibility()
     lastPhysicalGamepadConnected = connected
 end
 
--- The gamepad state is refreshed by the core every frame. Only resync the addon-owned stick when
--- the connection state changes, rather than rewriting its geometry on every OnUpdate.
+-- The addon can outlive a world-VM replacement. SavedVariables keep the artwork at the chosen
+-- position, while the new native Model starts with its defaults; detect that split and reapply
+-- the addon-owned settings even when the physical gamepad connection did not change.
+local function TouchStickConfigNeedsSync()
+    if type(Gamepad_GetTouchStick) ~= "function" then
+        return false
+    end
+
+    local centerX, centerY, radius, enabled, unlocked = Gamepad_GetTouchStick()
+    if type(centerX) ~= "number"
+        or type(centerY) ~= "number"
+        or type(radius) ~= "number" then
+        return true
+    end
+
+    local expectedEnabled = BenillaMobileDB.touchStickEnabled
+        and not IsPhysicalGamepadConnected()
+    return math.abs(centerX - BenillaMobileDB.touchStickX) > 0.1
+        or math.abs(centerY - BenillaMobileDB.touchStickY) > 0.1
+        or math.abs(radius - TOUCH_STICK_RADIUS) > 0.1
+        or enabled ~= expectedEnabled
+        or unlocked ~= BenillaMobileDB.touchStickUnlocked
+end
+
 local function RefreshTouchStickVisibility()
     local connected = IsPhysicalGamepadConnected()
-    if connected ~= lastPhysicalGamepadConnected then
+    if connected ~= lastPhysicalGamepadConnected or TouchStickConfigNeedsSync() then
         UpdateTouchStickVisibility()
     end
 end

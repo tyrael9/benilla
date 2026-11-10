@@ -445,7 +445,8 @@ pub(super) const GO_TYPE_MEETINGSTONE: i32 = 23;
 /// Whether a GameObject shows an interact cursor at all: `0x5f2f80` plus the per-type overrides.
 /// An INTERACT_COND object passes only while the server has set its per-player activate bit: the
 /// quest gate. The FISHINGNODE override (`0x5f6710`) compares our channel object, not
-/// `CREATED_BY`, then runs the shared gate.
+/// `CREATED_BY`; that exact ownership match replaces the template-faction check, while the
+/// ordinary in-use/no-interact and quest-activation gates still apply.
 fn highlightable_flags(
     type_id: i32,
     flags: u32,

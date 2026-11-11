@@ -538,9 +538,10 @@ pub(super) fn tick_script(
             // The UI scale is `UIParent`'s, which only the in-game state has; the glue lays out on
             // the root alone (`0x46dd30`).
             if script.vm_kind() == benilla_ui::script::VmKind::InGame {
-                // A display change re-applies the UI scale (`0x492e90`), whose narrow-aspect cap
-                // follows the window; a moved dial applies once, as its CVar callback does
-                // (`0x490770`). Deviation: the reference then re-reads the aspect (`0x492f13`), and
+                // A display change reapplies the manual dial directly, or the automatic scale when
+                // it is below the floor; only that automatic fallback keeps the narrow-aspect cap.
+                // A moved dial applies once through its CVar callback (`0x490770`). Deviation: the
+                // reference then re-reads the aspect (`0x492f13`), and
                 // on a change of 0.001 or more calls `0x491380`, which sets the reload trigger
                 // (`[0xb4b3f4]`) when the script-context check `0x494a50(0xa)` allows it; here a
                 // resize re-lays out the live UI, the chat bubbles' window-derived `BubbleGeometry`

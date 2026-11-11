@@ -20,9 +20,9 @@ pub(crate) fn ui_parent_scale(model: &Model) -> f32 {
         .map_or(1.0, |h| super::object::eff_scale(model, h))
 }
 
-/// The cap both `uiScale` legs apply before the sink (`0x490770`, and the display handler's ON leg
-/// `0x492e90`): below a 4:3 aspect `a` the value is capped at `0.75·a` (`a·3 ≥ 4` skips the cap, so
-/// 4:3 itself is never capped).
+/// The display handler's automatic scale cap: below a 4:3 aspect `a`, it is capped at `0.75·a`.
+/// A user-selected `uiScale` deliberately bypasses this cap so narrow split-screen windows remain
+/// adjustable; the automatic fallback retains the reference's aspect-ratio behavior.
 pub(crate) fn capped_ui_scale(ui_scale: f32, aspect: f32) -> f32 {
     if aspect * 3.0 < 4.0 {
         ui_scale.min(aspect * 0.75)
@@ -41,9 +41,10 @@ pub(crate) fn floored_ui_scale(v: f32) -> f32 {
     }
 }
 
-/// What the CVar callback applies (`0x490770` → `0x494550`): capped, then floored.
-pub(crate) fn effective_ui_scale(ui_scale: f32, aspect: f32) -> f32 {
-    floored_ui_scale(capped_ui_scale(ui_scale, aspect))
+/// What a user-selected `uiScale` applies: the dial value, subject only to `SetUiScale`'s floor.
+/// The split-window fork intentionally skips the reference's narrow-aspect cap for manual values.
+pub(crate) fn manual_ui_scale(ui_scale: f32) -> f32 {
+    floored_ui_scale(ui_scale)
 }
 
 /// The automatic scale `0x492f70` computes for a display `h` tall at the display aspect `aspect`
@@ -62,10 +63,10 @@ pub(crate) fn auto_ui_scale(h: u32, aspect: f32) -> f32 {
 }
 
 impl UiScript {
-    /// The host's `uiScale`, compared first like [`Self::set_screen_size`]: a new value applies at
-    /// once through the CVar's change callback (`0x490770`: capped, floored at 0.64), and `true`
-    /// says it reached a `UIParent`. The same value again does nothing, so an addon's own
-    /// `UIParent:SetScale` holds until the next change.
+    /// The host's `uiScale`, compared first like [`Self::set_screen_size`]: a new manual value
+    /// applies at once to `UIParent`, floored at 0.64 but not capped by the window's aspect ratio.
+    /// The same value again does nothing, so an addon's own `UIParent:SetScale` holds until the
+    /// next change.
     pub fn set_ui_scale(&mut self, ui_scale: f32) -> bool {
         let applied = {
             let mut model = self.model_mut();
@@ -73,11 +74,10 @@ impl UiScript {
                 return false;
             }
             model.ui_scale_request = Some(ui_scale);
-            let aspect = model.screen_aspect();
             model
                 .arena
                 .lookup("UIParent")
-                .map(|h| (h, effective_ui_scale(ui_scale, aspect)))
+                .map(|h| (h, manual_ui_scale(ui_scale)))
         };
         let Some((ui_parent, v)) = applied else {
             return false;
@@ -100,13 +100,13 @@ impl UiScript {
     }
 
     /// The display handler `0x492e90` on the last [`Self::set_ui_scale`], for the load and a
-    /// display change. Its ON leg caps the value and hands it to the sink only at 0.64 or more
-    /// (`0x492efd fcomp [0x804584]; test ah,1; jne 0x492f4a`); below, it falls to the automatic
-    /// scale `0x492f70(w, h, force = 0)` ([`auto_ui_scale`]), which does nothing at all when the
-    /// display is the one it last ran for (`auto_cache`, the reference's `[0xb4e304]`/`[0xb4e308]`,
-    /// which outlive the UI), and then signals `DISPLAY_SIZE_CHANGED` (`0x492f57`/`0x492f5c`, event
-    /// `0x1ff`), cache hit or not. `display` is the window in logical px, the host's unit for the
-    /// reference's device size. `true` when a scale reached `UIParent`.
+    /// display change. At or above the 0.64 floor it reapplies the manual dial value directly; below
+    /// the floor it falls to the automatic scale `0x492f70(w, h, force = 0)` ([`auto_ui_scale`]),
+    /// which retains the narrow-aspect cap and does nothing when the display is the one it last ran
+    /// for (`auto_cache`, the reference's `[0xb4e304]`/`[0xb4e308]`, which outlive the UI), then
+    /// signals `DISPLAY_SIZE_CHANGED` (`0x492f57`/`0x492f5c`, event `0x1ff`), cache hit or not.
+    /// `display` is the window in logical px, the host's unit for the reference's device size.
+    /// `true` when a scale reached `UIParent`.
     pub fn apply_ui_scale(
         &mut self,
         display: (u32, u32),
@@ -118,10 +118,9 @@ impl UiScript {
                 return false;
             };
             let aspect = model.screen_aspect();
-            let v = capped_ui_scale(ui_scale, aspect);
             let parent = |v| model.arena.lookup("UIParent").map(|h| (h, v));
-            if v >= UI_SCALE_FLOOR {
-                (parent(v), false)
+            if ui_scale >= UI_SCALE_FLOOR {
+                (parent(manual_ui_scale(ui_scale)), false)
             } else {
                 let (w, h) = display;
                 if w > 0 && h > 0 && *auto_cache == Some(display) {
@@ -149,20 +148,36 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_callback_ladder_caps_below_four_thirds_and_floors_at_the_sink() {
-        // 4:3 and wider: the dial as set.
-        assert_eq!(effective_ui_scale(0.9, 4.0 / 3.0), 0.9);
-        assert_eq!(effective_ui_scale(0.9, 16.0 / 9.0), 0.9);
-        assert_eq!(effective_ui_scale(1.2, 16.0 / 9.0), 1.2);
-        // 5:4 caps a full dial at 0.9375 and leaves 0.9 alone.
-        assert_eq!(effective_ui_scale(1.0, 1.25), 0.9375);
-        assert_eq!(effective_ui_scale(0.9, 1.25), 0.9);
-        // The floor, on both sides of it.
-        assert_eq!(effective_ui_scale(0.5, 16.0 / 9.0), UI_SCALE_FLOOR);
-        assert_eq!(effective_ui_scale(0.65, 16.0 / 9.0), 0.65);
-        // A square window caps at 0.75, a narrow one bottoms out at the floor.
-        assert_eq!(effective_ui_scale(0.9, 1.0), 0.75);
-        assert_eq!(effective_ui_scale(0.9, 0.5), UI_SCALE_FLOOR);
+    fn manual_ui_scale_keeps_the_dial_value_on_narrow_windows_and_floors_at_the_sink() {
+        // Wide, narrow, square and portrait windows all keep the same manually selected value.
+        assert_eq!(manual_ui_scale(0.7), 0.7);
+        assert_eq!(manual_ui_scale(0.9), 0.9);
+        assert_eq!(manual_ui_scale(1.0), 1.0);
+        assert_eq!(manual_ui_scale(1.2), 1.2);
+        // The SetUiScale floor remains in force.
+        assert_eq!(manual_ui_scale(0.5), UI_SCALE_FLOOR);
+        assert_eq!(manual_ui_scale(0.63), UI_SCALE_FLOOR);
+        assert_eq!(manual_ui_scale(0.65), 0.65);
+    }
+
+    #[test]
+    fn manual_scale_is_applied_directly_for_a_narrow_split_window() {
+        let mut s = UiScript::new().unwrap();
+        s.set_screen_size(1920.0, 2160.0);
+        s.set_screen_aspect(8.0 / 9.0);
+        s.run(r#"CreateFrame("Frame", "UIParent")"#).unwrap();
+
+        let scale = |s: &UiScript| s.eval::<f32>("return UIParent:GetScale()").unwrap();
+        let mut cache = None;
+
+        assert!(s.seat_ui_scale(0.9, (1920, 2160), &mut cache));
+        assert_eq!(scale(&s), 0.9, "load must preserve the 90% dial value");
+
+        assert!(s.set_ui_scale(0.7));
+        assert_eq!(scale(&s), 0.7, "70% must remain adjustable in split-screen");
+
+        assert!(s.set_ui_scale(1.0));
+        assert_eq!(scale(&s), 1.0, "100% must remain adjustable in split-screen");
     }
 
     #[test]

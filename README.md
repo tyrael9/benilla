@@ -46,6 +46,10 @@ renderer runs with no game attached. [`docs/MAP.md`](docs/MAP.md) maps every cra
 and [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md) lists everywhere benilla differs from 1.12.1; both are
 generated from the code.
 
+This fork's controller, mobile and iOS work is tracked separately from upstream changes. See
+[`docs/migration/`](docs/migration/README.md) for the feature inventory, v0.3.0 integration map
+and the current [addon compatibility audit](docs/migration/v0.3.0-addon-compatibility.md).
+
 ## Status
 
 Fully playable on a 1.12.1 server that doesn't enforce Warden or need client changes beyond its
@@ -98,8 +102,9 @@ screen, which remembers it. Credentials go in at the login screen, or set `WOW_U
 to skip it.
 
 Settings, screenshots and addons live in `benilla-config/` at the repo root: a 1.12 addon goes in
-`benilla-config/AddOns/`. [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) has the rest, from the
-player build to the tests.
+`benilla-config/AddOns/`. The iOS app keeps these in its persistent container; see
+[`docs/ios-persistent-install.md`](docs/ios-persistent-install.md) for first-install and update steps.
+[`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) has the rest, from the player build to the tests.
 
 ## Contributing
 

@@ -604,6 +604,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
                         mode,
                         reverse,
                         may_cast,
+                        range_override: None,
+                        require_in_view: false,
                     },
                 )?;
                 Ok(())
@@ -1008,7 +1010,9 @@ mod tests {
                 ScriptCall::TargetNearest {
                     mode: NearestMode::Enemy,
                     reverse: true,
-                    may_cast: true
+                    may_cast: true,
+                    range_override: None,
+                    require_in_view: false,
                 },
                 ScriptCall::TargetLastTarget { may_cast: true },
                 ScriptCall::AttackTarget {

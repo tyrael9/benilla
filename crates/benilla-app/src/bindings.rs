@@ -73,6 +73,19 @@ impl BindingDispatch {
         }
         self.map.get(&chord.fallback()?).map(String::as_str)
     }
+
+    /// Dispatch a key through the same binding resolver after the UI's key-down walk declined it.
+    pub(crate) fn dispatch_key(&self, script: &mut UiScript, key: &str) {
+        let Some(chord) = Chord::parse(key) else {
+            warn!("bindings: invalid key chord '{key}'");
+            return;
+        };
+        if let Some(command) = self.resolve(chord, false) {
+            if let Err(error) = script.execute_binding(command, true) {
+                warn!("bindings: dispatch {key}: {error}");
+            }
+        }
+    }
 }
 
 /// The engine's input state the binding functions drive, the reference's `[InputControl+4]` and
@@ -119,6 +132,16 @@ pub(crate) struct BindingLatches {
     /// pass, so a window deactivate empties it and a key held across an alt-tab resumes, as in
     /// the reference. Keyboard only: mouse edges cannot repeat.
     down: KeyDownList,
+}
+
+impl BindingLatches {
+    /// The stock SITORSTAND binding is press-only, but swimming reads it as a held downward axis.
+    /// Derive the hold from physical binding latches so every binding and release path stays exact.
+    pub(crate) fn sit_or_stand_down(&self) -> bool {
+        self.latched
+            .iter()
+            .any(|(_, command)| command.eq_ignore_ascii_case("SITORSTAND"))
+    }
 }
 
 /// The keys believed down, the reference's own list (`0x4248b3`): a press of a key on it is an
@@ -990,8 +1013,30 @@ fn end_dispatch(
     keys: Res<ButtonInput<KeyCode>>,
     buttons: Res<ButtonInput<MouseButton>>,
     mut latches: ResMut<BindingLatches>,
+    gamepad: Option<Res<crate::gamepad::GamepadSnapshot>>,
+    mut gamepad_bindings: Option<ResMut<crate::gamepad::GamepadBindings>>,
+    dispatch: Res<BindingDispatch>,
+    mut gamepad_vm: Local<crate::ui_script::VmMemo<bool>>,
 ) {
     vm.run(|mut script| {
+        // The gamepad bridge is absent in small headless harnesses; keyboard and mouse
+        // bindings remain fully usable there.
+        if let (Some(gamepad), Some(gamepad_bindings)) =
+            (gamepad.as_deref(), gamepad_bindings.as_deref_mut())
+        {
+            let vm_changed = script
+                .as_deref_mut()
+                .is_some_and(|script| gamepad_vm.claim(script));
+            if vm_changed {
+                gamepad_bindings.reset_for_vm();
+            }
+            crate::gamepad::dispatch_action_bindings(
+                script.as_deref_mut(),
+                gamepad,
+                gamepad_bindings,
+            );
+            crate::gamepad::dispatch_utility_bindings(script.as_deref_mut(), gamepad, &dispatch);
+        }
         // ── The stuck-latch sweep ── a release the window never saw: a latch whose base key reads
         // up unlatches now and runs its up-half. The reference's two bulk clears land here too,
         // since bevy zeroes `ButtonInput` for both (see `begin_dispatch`). UI keyboard focus never
@@ -1126,6 +1171,24 @@ fn release(state: &mut BindingLatches, mut script: Option<&mut UiScript>, key: H
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn sit_or_stand_down_tracks_all_matching_physical_binding_latches() {
+        let mut latches = super::BindingLatches::default();
+        let first = super::Held::Key(bevy::prelude::KeyCode::KeyX);
+        let second = super::Held::Key(bevy::prelude::KeyCode::KeyY);
+        latches.latched.push((first, "SITORSTAND".into()));
+        latches.latched.push((second, "sitorstand".into()));
+        latches
+            .latched
+            .push((super::Held::Key(bevy::prelude::KeyCode::KeyZ), "JUMP".into()));
+
+        assert!(latches.sit_or_stand_down());
+        latches.latched.retain(|(key, _)| *key != first);
+        assert!(latches.sit_or_stand_down(), "the second bound key is still held");
+        latches.latched.retain(|(key, _)| *key != second);
+        assert!(!latches.sit_or_stand_down());
+    }
+
     use bevy::input::keyboard::{Key, KeyboardInput};
     use bevy::input::mouse::MouseButtonInput;
 

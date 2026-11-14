@@ -202,8 +202,11 @@ type KeyboardFeed<'w> = (
 #[allow(clippy::too_many_arguments)]
 pub(super) fn feed_ui_input(
     mut script: Option<NonSendMut<UiScript>>,
+    // Keep this read-only: InputHost's ArmTracer also reads the primary Window while tracing a
+    // world click. Queue the IME toggle below so this system's accesses remain disjoint.
+    mut _commands: Commands,
     // Carries the `wl_display` the Wayland clipboard backend needs, once winit has a surface.
-    window: Query<(&Window, Option<&bevy::window::RawHandleWrapper>), With<PrimaryWindow>>,
+    window: Query<(Entity, &Window, Option<&bevy::window::RawHandleWrapper>), With<PrimaryWindow>>,
     records: Res<super::InputRecords>,
     mut pointer: PointerFeed,
     mut kbd: KeyboardFeed,
@@ -214,6 +217,10 @@ pub(super) fn feed_ui_input(
     state: Option<Res<State<crate::client_state::ClientState>>>,
     // The characters the active layout makes, which name a key for a keyboard frame.
     layout: Res<crate::bindings::LayoutNames>,
+    // LT's pointer owns the cursor position while the virtual mouse is active.
+    gamepad_mouse: Option<Res<crate::gamepad::GamepadVirtualMouse>>,
+    // A UI-owned touch stays seated at its last position between TouchMoved messages.
+    gamepad_state: Option<Res<crate::gamepad::GamepadSnapshot>>,
     // Lent to the VM for the pass, so a click's, a key's or a binding's script calls apply in the
     // call, the world click's arm picking inside it.
     mut host: crate::script_calls::InputHost,
@@ -252,9 +259,16 @@ pub(super) fn feed_ui_input(
     let start = walk.next;
     walk.next = records.iter().count();
     let window = window.single().ok();
-    let (mut script, (window, raw_handle)) = match (script, window) {
-        (Some(script), Some(window)) => (script, window),
-        (script, _) => {
+    let (mut script, (_window_entity, window, raw_handle)) = match (script, window) {
+        (Some(script), Some((entity, window, raw_handle))) => (script, (entity, window, raw_handle)),
+        (script, maybe_window) => {
+            #[cfg(target_os = "ios")]
+            if let Some((entity, window, _)) = maybe_window {
+                // No focused FrameXML field (or no VM): do not leave UIKit's keyboard enabled.
+                queue_ime_enabled(&mut _commands, entity, window, false);
+            }
+            #[cfg(not(target_os = "ios"))]
+            let _ = maybe_window;
             // No VM or no window: no walk, and the world frame's binding meets every record, the VM's
             // bodies running when there is one.
             capture.typing = false;
@@ -306,7 +320,17 @@ pub(super) fn feed_ui_input(
         alt: keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight),
         sup: keys.pressed(KeyCode::SuperLeft) || keys.pressed(KeyCode::SuperRight),
     };
-    let end = ui_point(window.cursor_position());
+    let end = ui_point(
+        gamepad_state
+            .as_deref()
+            .and_then(|state| state.touch_ui_pointer)
+            .or_else(|| {
+                gamepad_mouse
+                    .as_deref()
+                    .and_then(|mouse| mouse.window_position)
+            })
+            .or_else(|| window.cursor_position()),
+    );
     let walk = &mut *walk;
     let feed = |script: &mut UiScript| {
         // The pick routes the world drop: an object keeps the payload, terrain or sky drops it.
@@ -429,26 +453,47 @@ pub(super) fn feed_ui_input(
                     // and the characters go to `char_input`, a walk of its own. A repeat goes to
                     // the frame that took the press instead (`0x766070`), a release likewise
                     // (`0x765fd0`).
-                    let walk = if reaches_ui(ev, egui_keyboard) {
-                        feed_key(
-                            script,
-                            capture,
-                            ev,
-                            &mut pressed,
-                            releases,
-                            mods,
-                            &layout,
-                            clipboard,
-                            wl_display,
-                        )
+                    #[cfg(target_os = "ios")]
+                    let software_return = ev.state == ButtonState::Pressed
+                        && reaches_ui(ev, egui_keyboard)
+                        && is_ios_software_return(ev.key_code, ev.text.as_deref());
+                    #[cfg(not(target_os = "ios"))]
+                    let software_return = false;
+
+                    if software_return {
+                        // Some iOS software-keyboard layouts report Return as text rather than
+                        // a physical Enter key code. Route it through FrameXML's ENTER walk so
+                        // ChatFrameEditBox.OnEnterPressed sends the message instead of inserting
+                        // a newline into a single-line field.
+                        script.key_down("ENTER");
+                        capture.consumed.push(ev.key_code);
+                        verdict = crate::bindings::KeyVerdict {
+                            typing: capture.typing,
+                            arrows_fall_through: capture.arrows_fall_through,
+                            eaten: true,
+                        };
                     } else {
-                        KeyWalk::Declined
-                    };
-                    verdict = crate::bindings::KeyVerdict {
-                        typing: capture.typing,
-                        arrows_fall_through: capture.arrows_fall_through,
-                        eaten: walk != KeyWalk::Declined,
-                    };
+                        let walk = if reaches_ui(ev, egui_keyboard) {
+                            feed_key(
+                                script,
+                                capture,
+                                ev,
+                                &mut pressed,
+                                releases,
+                                mods,
+                                &layout,
+                                clipboard,
+                                wl_display,
+                            )
+                        } else {
+                            KeyWalk::Declined
+                        };
+                        verdict = crate::bindings::KeyVerdict {
+                            typing: capture.typing,
+                            arrows_fall_through: capture.arrows_fall_through,
+                            eaten: walk != KeyWalk::Declined,
+                        };
+                    }
                 }
             }
             // A right press the world frame may take stops here for its hook, which runs ahead of
@@ -522,6 +567,27 @@ pub(super) fn feed_ui_input(
         }
     };
     host.lend(&mut script, feed);
+
+    // Bevy's iOS winit view presents UIKit's software keyboard only while IME is enabled.
+    // Keep this synchronized with the same focus gate used to capture game bindings; the
+    // record walk above may have just focused or blurred a FrameXML EditBox.
+    #[cfg(target_os = "ios")]
+    queue_ime_enabled(&mut _commands, _window_entity, window, capture.typing);
+}
+
+/// Queue an IME toggle after this system's immutable Window reads and world-click trace have ended.
+/// An immediate `Query<&mut Window>` conflicts with `PointPick`'s `Query<&Window>` inside
+/// `InputHost::ArmTracer`, even though the tracer only lends during a world-click call.
+#[cfg(target_os = "ios")]
+fn queue_ime_enabled(commands: &mut Commands, entity: Entity, window: &Window, enabled: bool) {
+    if window.ime_enabled == enabled {
+        return;
+    }
+    commands.queue(move |world: &mut World| {
+        if let Some(mut window) = world.get_mut::<Window>(entity) {
+            window.ime_enabled = enabled;
+        }
+    });
 }
 
 /// The press `r` hands the mouse commands its binding runs: its point, and whether the frame's
@@ -606,6 +672,13 @@ fn hover_walk(script: &mut UiScript, at: Vec2) -> Option<u32> {
         }
     }
     hovered
+}
+
+/// Whether iOS reported the software keyboard's Return action as a newline text event.
+#[cfg(any(target_os = "ios", test))]
+fn is_ios_software_return(key_code: KeyCode, text: Option<&str>) -> bool {
+    !matches!(key_code, KeyCode::Enter | KeyCode::NumpadEnter)
+        && text.is_some_and(|text| matches!(text, "\n" | "\r" | "\r\n"))
 }
 
 /// Whether a key event reaches the UI while a dev overlay's text field may hold the keyboard: none
@@ -775,6 +848,28 @@ pub(crate) fn feed_key(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn input_feed_system_has_disjoint_primary_window_access_for_click_tracing() {
+        // InputHost::ArmTracer's PointPick reads Window. Registering the complete system
+        // validates that the feed does not also request mutable Window access.
+        let mut world = World::new();
+        let system = world.register_system(feed_ui_input);
+        // Initialization performs the access census. With an empty world the later parameter
+        // validation can fail; that is expected and unrelated to the conflict this test guards.
+        let _ = world.run_system(system);
+    }
+
+    #[test]
+    fn ios_software_keyboard_return_is_not_inserted_as_a_character() {
+        assert!(is_ios_software_return(KeyCode::KeyA, Some("\n")));
+        assert!(is_ios_software_return(KeyCode::KeyA, Some("\r")));
+        assert!(is_ios_software_return(KeyCode::KeyA, Some("\r\n")));
+        assert!(!is_ios_software_return(KeyCode::Enter, Some("\n")));
+        assert!(!is_ios_software_return(KeyCode::NumpadEnter, Some("\r")));
+        assert!(!is_ios_software_return(KeyCode::KeyA, Some("a")));
+        assert!(!is_ios_software_return(KeyCode::KeyA, None));
+    }
 
     fn wheel_pane() -> UiScript {
         let mut s = UiScript::new().unwrap();

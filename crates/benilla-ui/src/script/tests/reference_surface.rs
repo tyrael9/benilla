@@ -9,7 +9,19 @@ use std::collections::HashSet;
 use super::common::script;
 
 /// Globals the engine exposes that 1.12 does not, each with its reason. The list is exact.
-const BEYOND_1_12: &[&str] = &[];
+const BEYOND_1_12: &[&str] = &[
+    // The fork's explicitly documented controller/mobile addon API; these are not 1.12.1 globals.
+    "Gamepad_GetAxis",
+    "Gamepad_GetTouchStick",
+    "Gamepad_GetTouchStickValue",
+    "Gamepad_IsButtonDown",
+    "Gamepad_IsConnected",
+    "Gamepad_IsTouchDevice",
+    "Gamepad_IsTouchStickActive",
+    "Gamepad_IsTouchStickEnabled",
+    "Gamepad_IsTouchStickUnlocked",
+    "Gamepad_SetTouchStick",
+];
 
 /// `reference/lua_globals.tsv`'s names.
 fn reference() -> HashSet<String> {

@@ -109,7 +109,7 @@ pub(crate) fn stats_for(
     tables: Option<&PetStatTables>,
     family: (Option<String>, Option<String>, Vec<String>),
 ) -> (bool, PetStats) {
-    let (_, icon, food_types) = family;
+    let (family_name, icon, food_types) = family;
     let Some(fields) = pet.map(|s| &s.0) else {
         return (false, PetStats::default());
     };
@@ -128,6 +128,7 @@ pub(crate) fn stats_for(
             has_ui,
             PetStats {
                 // Whether the reference gates the icon is untraced.
+                family: family_name,
                 icon,
                 ..PetStats::default()
             },
@@ -139,6 +140,7 @@ pub(crate) fn stats_for(
         has_ui,
         PetStats {
             hunter_pet: true,
+            family: family_name,
             happiness,
             damage_percentage,
             loyalty_rate,
@@ -437,6 +439,11 @@ mod tests {
             (Some("Boar".into()), None, boar_diet.clone()),
         );
         assert!(!s.hunter_pet);
+        assert_eq!(
+            s.family.as_deref(),
+            Some("Boar"),
+            "the word stays paired with GetPetIcon even when hunter-only stats are gated"
+        );
         assert!(
             s.food_types.is_empty(),
             "…but the diet shares 0x6116e0 with the stats"

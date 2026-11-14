@@ -42,8 +42,11 @@ fn look_frame(
         nearclip: 0.2,
         surface_y: None,
     };
-    hand.handed = run_look_session(
+    hand.handed = run_look_session_with_gamepad(
         &motion,
+        Vec2::ZERO,
+        Vec2::ZERO,
+        false,
         &mut rig,
         &mut cam,
         &mut hand.face_yaw,

@@ -2,15 +2,16 @@
 //!
 //! Deviation: TAB uses Classic Era's screen-space priority, not 1.12's ±30° facing cone and
 //! snapshot cursor (`0x493f60`), because the cone skips a close mob in front of the camera, which
-//! sits behind the character. On-screen candidates come first, the lowest score wins, and each
+//! sits behind the character. The pulled-in viewport candidates come first; stock TAB keeps its
+//! off-screen fallback, while controller R3 is restricted to the actual camera viewport. Each
 //! press skips recently tabbed guids; a fighting-me bonus, not Classic's hard combat lock, ranks
 //! attackers first without pinning TAB to them.
 //!
 //! Kept from 1.12: the validity filters (`0x493e40`, `CanAttack 0x606980`, critters), the
 //! [`commit_owing`] through `SetSelection` (`0x493540`), the attack acquire (`0x612df0` at `0x6130b5`),
 //! the ATTACKERSTATEUPDATE and spell start acquires (`0x6259c9`–`0x6259fe`, `0x6e7963`-`0x6e799c`)
-//! and the range, `targetNearestDistance`'s value ([`super::TabRange`], `0x49435d`). The radius
-//! behind the cone, `targetNearestDistanceRadius`, has no counterpart.
+//! and the `targetNearestDistance` CVar's live value. Controller R3 shares that configured
+//! radius while restricting its candidate pool to the camera viewport.
 
 use benilla_formats::CreatureTypeTable;
 use benilla_protocol::{guid, EntityKind};
@@ -50,23 +51,23 @@ fn tab_trace_on() -> bool {
     *ON.get_or_init(|| std::env::var_os("WOW_TAB_TRACE").is_some())
 }
 
-/// The reference's scan mode: the `TargetNearest*` shims (`0x489a80` enemy 1, `0x489aa0` friend 2,
-/// `0x489ac0`/`0x489ae0` party and raid 3/4) all call one cycler, `0x493f60(reverse, mode)`, and
-/// the mode reaches only the per-candidate filter `0x493e40`.
+/// The reference's four stock scans plus the controller's two non-stock modes. Every mode uses
+/// the same screen/distance ordering; the Interactable/Smart filters additionally admit world
+/// objects and corpses into the candidate pool.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ScanSide {
-    /// Mode 1 (`0x493e73`): alive by the reads-dead triple `0x605f90`, and `CanAttack 0x606980`.
+    /// Alive units we can attack.
     Enemy,
-    /// Mode 2 (`0x493eca`): `CanAssist 0x6066f0`, friendly or better (`0x60671e`), whose
-    /// `IsPvP 0x605ff0` leg refuses a creature without `UNIT_FLAG_PVP`; then health > 0 with no
-    /// dynflag leg, so a feigning ally counts.
+    /// Living units we can assist.
     Friend,
-    /// Mode 3 (`0x493eed`): not us, then `0x4e7f70`, a member of our party slots. No health, dead
-    /// or reaction leg.
+    /// Party members.
     Party,
-    /// Mode 4 (`0x493f15`): not us, then `0x4918e0`, party (`0x4e7f70`) or raid roster
-    /// (`0x4baee0`).
+    /// Party or raid members.
     Raid,
+    /// NPC services, lootable units/corpses, and usable GameObjects.
+    Interactable,
+    /// Hostiles plus interactables; the controller chooses this outside combat.
+    Smart,
 }
 
 impl ScanSide {
@@ -78,6 +79,8 @@ impl ScanSide {
             NearestMode::Friend => Self::Friend,
             NearestMode::PartyMember => Self::Party,
             NearestMode::RaidMember => Self::Raid,
+            NearestMode::Interactable => Self::Interactable,
+            NearestMode::Smart => Self::Smart,
         }
     }
 }
@@ -87,11 +90,18 @@ impl ScanSide {
 struct Candidate {
     entity: Entity,
     guid: u64,
+    kind: EntityKind,
+    /// Inside the actual camera viewport (including its outer edge band).
+    in_view: bool,
+    /// Inside the pulled-in priority region; visible edge-band candidates remain eligible.
     on_screen: bool,
     score: f32,
+    /// Party/subgroup first for Friend scans, followed by other raid members.
+    friend_priority: u8,
 }
 
-/// Off-centerness (none off-screen) plus normalized distance, minus the fighting-me bonus.
+/// Off-centerness (none outside the pulled-in priority region) plus normalized distance, minus
+/// the fighting-me bonus.
 fn priority_score(off_center: Option<f32>, dist: f32, range: f32, combat_with_me: bool) -> f32 {
     off_center.map_or(0.0, |c| W_SCREEN * c) + W_DIST * (dist / range)
         - if combat_with_me {
@@ -105,15 +115,29 @@ fn priority_score(off_center: Option<f32>, dist: f32, range: f32, combat_with_me
 fn candidate_order(a: &Candidate, b: &Candidate) -> std::cmp::Ordering {
     b.on_screen
         .cmp(&a.on_screen)
+        .then(a.friend_priority.cmp(&b.friend_priority))
         .then(a.score.total_cmp(&b.score))
 }
 
-/// The on-screen tier when it is not empty, else every candidate (`AllowAnyOnScreen` = 1).
-fn select_pool(cands: &[Candidate]) -> Vec<Candidate> {
-    if cands.iter().any(|c| c.on_screen) {
-        cands.iter().filter(|c| c.on_screen).copied().collect()
+/// The pulled-in screen tier when it is not empty, otherwise the eligible fallback tier.
+///
+/// Stock TargetNearest keeps the historical off-screen fallback. Controller R3 asks for
+/// `require_in_view`, which removes points outside the actual camera viewport first; visible
+/// points in the outer 10% edge band remain valid fallback candidates.
+fn select_pool(cands: &[Candidate], require_in_view: bool) -> Vec<Candidate> {
+    let eligible: Vec<_> = cands
+        .iter()
+        .filter(|candidate| !require_in_view || candidate.in_view)
+        .copied()
+        .collect();
+
+    if eligible.iter().any(|candidate| candidate.on_screen) {
+        eligible
+            .into_iter()
+            .filter(|candidate| candidate.on_screen)
+            .collect()
     } else {
-        cands.to_vec()
+        eligible
     }
 }
 
@@ -236,8 +260,10 @@ pub(crate) struct TargetScan<'w, 's> {
     index: Option<Res<'w, GuidIndex>>,
     /// The party slots and raid roster modes 3 and 4 test; `Option` for the same harnesses.
     group: Option<Res<'w, crate::ui_party::GroupState>>,
-    /// `targetNearestDistance`, the default's in those harnesses.
+    /// `targetNearestDistance`, 41 yards until the CVar is changed.
     tab_range: Option<Res<'w, super::TabRange>>,
+    /// GameObject faction/template and meeting-stone inputs; optional for UI-only scan harnesses.
+    go_gate: Option<super::hover::GoGateInputs<'w>>,
 }
 
 impl TargetScan<'_, '_> {
@@ -269,6 +295,54 @@ impl TargetScan<'_, '_> {
                 .group
                 .as_ref()
                 .is_some_and(|g| g.party_or_raid_member(guid)),
+            ScanSide::Interactable => false,
+            ScanSide::Smart => {
+                if store.is_some_and(|s| s.0.unit_reads_dead()) {
+                    return false;
+                }
+                pair.is_some_and(|(me, unit)| rel.can_attack(&me, &unit))
+            }
+        }
+    }
+
+    /// Whether an object currently admits an interaction through the client's normal gates.
+    fn is_interactable(&self, kind: EntityKind, guid: u64, store: Option<&ObjectStore>) -> bool {
+        let Some(store) = store else {
+            return false;
+        };
+
+        match kind {
+            EntityKind::Unit | EntityKind::Player => {
+                if store.0.unit_is_dead() {
+                    return store.0.unit_lootable();
+                }
+                self.pair(guid, Some(store))
+                    .is_some_and(|(me, unit)| self.relations.get().can_interact(&me, &unit))
+            }
+            EntityKind::Corpse => !store.0.corpse_is_bones() || store.0.corpse_lootable(),
+            EntityKind::GameObject => {
+                let Some(gate) = self.go_gate.as_ref() else {
+                    return false;
+                };
+                let reaction = super::cursor_mode::go_reaction(
+                    gate.factions.as_deref(),
+                    store.0.gameobject_faction(),
+                    self.self_store(),
+                );
+                let template = gate.templates.of(&store.0);
+                let overrides = super::cursor_mode::GoOverrides {
+                    channel_owned: super::cursor_mode::fishing_channel_owned(
+                        self.self_store(),
+                        Some(guid),
+                    ),
+                    meeting_stone_queued: super::cursor_mode::meeting_stone_queued(
+                        template.and_then(|t| t.meeting_stone).map(|m| m.area),
+                        gate.queued_area(),
+                    ),
+                };
+                super::cursor_mode::go_highlightable(store, reaction, overrides)
+            }
+            _ => false,
         }
     }
 
@@ -300,37 +374,92 @@ impl TargetScan<'_, '_> {
         self.index.as_ref()?.0.get(&guid).copied()
     }
 
+    fn friend_priority(&self, side: ScanSide, guid: u64) -> u8 {
+        if side != ScanSide::Friend {
+            return 2;
+        }
+
+        let Some(group) = self.group.as_ref() else {
+            return 2;
+        };
+
+        // Own party/subgroup always wins.
+        if group.party_slots().any(|member| member.guid == guid) {
+            return 0;
+        }
+
+        // In a raid, other-subgroup members are the second tier.
+        if group.group_type == 1 && group.members.iter().any(|member| member.guid == guid) {
+            return 1;
+        }
+
+        2
+    }
+
     fn store_at(&self, entity: Entity) -> Option<&ObjectStore> {
         self.stores.get(entity).ok()
     }
 
+    /// The user's TAB distance, 41 yards until targetNearestDistance is changed.
+    fn configured_range(&self) -> f32 {
+        self.tab_range
+            .as_deref()
+            .map_or(super::TabRange::default().0, |r| r.0)
+    }
+
     /// Filter, project, score and sort every known unit, fresh each press.
     fn build(&self, side: ScanSide) -> Vec<Candidate> {
+        self.build_with_range(side, self.configured_range(), false)
+    }
+
+    /// Build the same candidate pool at the supplied range. R3 passes the live CVar value and
+    /// sets `require_in_view` to reject candidates outside the actual camera viewport.
+    fn build_with_range(
+        &self,
+        side: ScanSide,
+        range: f32,
+        require_in_view: bool,
+    ) -> Vec<Candidate> {
         let Ok((self_tf, _, self_guid)) = self.self_q.single() else {
             return Vec::new();
         };
         let me = self_guid.map(|g| g.0);
         let cam = self.camera.single().ok();
-        // The limit the collector squares (`0x494350`, `0x49435d`).
-        let range = self
-            .tab_range
-            .as_deref()
-            .map_or(super::TabRange::default().0, |r| r.0);
-        // Off-centerness on the pulled-in screen, 0 at the centre and about 1 at a corner, `None`
-        // outside it. Callers project the root + 1 yd, so feet just below the edge still count.
-        let project = |world: Vec3| -> Option<f32> {
-            let (camera, cam_pose) = cam?;
+        // Return actual viewport membership separately from the pulled-in priority score.
+        // Camera projection fails for points behind the camera or beyond its near/far planes.
+        // A successful projection may still land in the outer viewport edge band: that is
+        // visible, but not part of the preferred 80% screen region.
+        // Callers project the root + 1 yd, so feet just below the edge still count.
+        let project = |world: Vec3| -> (bool, Option<f32>) {
+            let Some((camera, cam_pose)) = cam else {
+                return (false, None);
+            };
             let cam_tf = GlobalTransform::from(*cam_pose);
-            let vp = camera.logical_viewport_size()?;
-            let screen = camera.world_to_viewport(&cam_tf, world).ok()?;
-            let x0 = vp.x * FRUSTUM_PULL_SIDES;
-            let x1 = vp.x * (1.0 - FRUSTUM_PULL_SIDES);
-            let y0 = vp.y * FRUSTUM_PULL_TOP;
-            let y1 = vp.y * (1.0 - FRUSTUM_PULL_BOT);
-            if screen.x < x0 || screen.x > x1 || screen.y < y0 || screen.y > y1 {
-                return None;
+            let Some(viewport) = camera.logical_viewport_rect() else {
+                return (false, None);
+            };
+            let Ok(screen) = camera.world_to_viewport(&cam_tf, world) else {
+                return (false, None);
+            };
+            if screen.x < viewport.min.x
+                || screen.x > viewport.max.x
+                || screen.y < viewport.min.y
+                || screen.y > viewport.max.y
+            {
+                return (false, None);
             }
-            Some(screen.distance(vp * 0.5) / (vp.length() * 0.5))
+            let vp = viewport.max - viewport.min;
+            let x0 = viewport.min.x + vp.x * FRUSTUM_PULL_SIDES;
+            let x1 = viewport.min.x + vp.x * (1.0 - FRUSTUM_PULL_SIDES);
+            let y0 = viewport.min.y + vp.y * FRUSTUM_PULL_TOP;
+            let y1 = viewport.min.y + vp.y * (1.0 - FRUSTUM_PULL_BOT);
+            if screen.x < x0 || screen.x > x1 || screen.y < y0 || screen.y > y1 {
+                return (true, None);
+            }
+            (
+                true,
+                Some(screen.distance(viewport.min + vp * 0.5) / (vp.length() * 0.5)),
+            )
         };
         let trace = tab_trace_on();
         let trace_unit = |guid: u64, tf: &Transform, verdict: &str| {
@@ -347,10 +476,28 @@ impl TargetScan<'_, '_> {
         };
         let mut out = Vec::new();
         for (entity, net, guid_c, tf, store) in &self.units {
-            if !matches!(net.kind, EntityKind::Unit | EntityKind::Player) {
+            let is_unit = matches!(net.kind, EntityKind::Unit | EntityKind::Player);
+            if !matches!(
+                net.kind,
+                EntityKind::Unit | EntityKind::Player | EntityKind::GameObject | EntityKind::Corpse
+            ) {
                 continue;
             }
-            if !self.is_valid(side, guid_c.0, store) {
+            let valid = match side {
+                ScanSide::Enemy | ScanSide::Friend | ScanSide::Party | ScanSide::Raid => {
+                    is_unit && self.is_valid(side, guid_c.0, store)
+                }
+                ScanSide::Interactable => self.is_interactable(net.kind, guid_c.0, store),
+                ScanSide::Smart => {
+                    if is_unit {
+                        self.is_valid(ScanSide::Smart, guid_c.0, store)
+                            || self.is_interactable(net.kind, guid_c.0, store)
+                    } else {
+                        self.is_interactable(net.kind, guid_c.0, store)
+                    }
+                }
+            };
+            if !valid {
                 trace_unit(
                     guid_c.0,
                     tf,
@@ -359,6 +506,8 @@ impl TargetScan<'_, '_> {
                         ScanSide::Friend => "REJECT dead-or-unassistable",
                         ScanSide::Party => "REJECT not-in-party",
                         ScanSide::Raid => "REJECT not-in-party-or-raid",
+                        ScanSide::Interactable => "REJECT not-interactable",
+                        ScanSide::Smart => "REJECT not-smart-target",
                     },
                 );
                 continue;
@@ -378,22 +527,32 @@ impl TargetScan<'_, '_> {
                     }
                 }
             }
-            // Deviation: no drawn gate (the reference's IsEntityDrawn, `0x6704c0`), because the
-            // draw election hides every body outside the frustum, which would empty the off-screen
-            // tier.
+            // Stock TargetNearest deviation: no IsEntityDrawn gate (`0x6704c0`), retaining its
+            // off-screen fallback. Controller R3 adds a stricter actual-viewport gate after
+            // projection below.
             let dist = (tf.translation - self_tf.translation).length();
             if dist > range {
-                trace_unit(guid_c.0, tf, "REJECT range");
+                trace_unit(
+                    guid_c.0,
+                    tf,
+                    &format!("REJECT range (> {range:.1} yd)"),
+                );
                 continue;
             }
-            let off_center = project(tf.translation + Vec3::Y);
+            let (in_view, off_center) = project(tf.translation + Vec3::Y);
+            if require_in_view && !in_view {
+                trace_unit(guid_c.0, tf, "REJECT outside-view");
+                continue;
+            }
             // Enemy side only: a healer in combat and targeting you would head the CTRL-TAB pool.
             let cwm = side == ScanSide::Enemy && store.is_some_and(|s| combat_with_me(s, me));
             let score = priority_score(off_center, dist, range, cwm);
             if trace {
-                let screen = off_center
-                    .map(|c| format!("center+{c:.2}"))
-                    .unwrap_or_else(|| "OFF-SCREEN".into());
+                let screen = match (in_view, off_center) {
+                    (false, _) => "OUTSIDE-VIEW".to_string(),
+                    (true, None) => "VIEW-EDGE".to_string(),
+                    (true, Some(c)) => format!("center+{c:.2}"),
+                };
                 trace_unit(
                     guid_c.0,
                     tf,
@@ -406,8 +565,11 @@ impl TargetScan<'_, '_> {
             out.push(Candidate {
                 entity,
                 guid: guid_c.0,
+                kind: net.kind,
+                in_view,
                 on_screen: off_center.is_some(),
                 score,
+                friend_priority: self.friend_priority(side, guid_c.0),
             });
         }
         out.sort_by(candidate_order);
@@ -419,7 +581,13 @@ impl TargetScan<'_, '_> {
                     self.names
                         .resolve_unit(c.guid, None, Ask::Read)
                         .unwrap_or("?"),
-                    if c.on_screen { "on-screen" } else { "fallback" },
+                    if c.on_screen {
+                        "on-screen"
+                    } else if c.in_view {
+                        "view-edge"
+                    } else {
+                        "off-screen"
+                    },
                     c.score
                 );
             }
@@ -822,55 +990,70 @@ pub(super) fn commit(
 pub(super) fn cycle(
     side: ScanSide,
     reverse: bool,
+    range_override: Option<f32>,
+    require_in_view: bool,
     now: f64,
     scan: &TargetScan,
     history: &mut TabHistory,
     selection: &mut Selection,
+    interact: &mut super::InteractTarget,
     seam: &mut crate::creature_anim::AttackSeam,
     front: &mut super::front::SelectFront,
 ) -> Owed {
     history.enter(side);
     history.prune(now);
     let trace = tab_trace_on();
+    let range = range_override.unwrap_or_else(|| scan.configured_range());
     if trace {
         info!(
-            "tab-trace: {side:?} press (reverse={reverse}), selection {:?}, history {}",
+            "tab-trace: {side:?} press (reverse={reverse}), range {range:.1} yd (targetNearestDistance), selection {:?}, history {}",
             selection.guid.map(|g| format!("{g:#x}")),
             history.visited.len()
         );
     }
-    let cands = scan.build(side);
+    // Keyboard/script targeting keeps its historical off-screen fallback. Controller R3 uses the
+    // same live CVar range but never falls back to candidates outside the camera viewport.
+    let cands = scan.build_with_range(side, range, require_in_view);
     if cands.is_empty() {
         if trace {
             info!("tab-trace: no candidates — target unchanged");
         }
         return Owed::default();
     }
-    let pool = select_pool(&cands);
+    let pool = select_pool(&cands, require_in_view);
+    if pool.is_empty() {
+        if trace {
+            info!("tab-trace: no in-view candidates — target unchanged");
+        }
+        return Owed::default();
+    }
     if trace {
+        let tier = if pool.iter().any(|c| c.on_screen) {
+            "priority-view"
+        } else if require_in_view {
+            "visible-edge"
+        } else {
+            "fallback"
+        };
         info!(
-            "tab-trace: pool {}/{} ({} tier)",
+            "tab-trace: pool {}/{} ({tier} tier)",
             pool.len(),
-            cands.len(),
-            if cands.iter().any(|c| c.on_screen) {
-                "on-screen"
-            } else {
-                "fallback"
-            }
+            cands.len()
         );
     }
     // Reverse walks the history back; an empty walk falls through to the forward pick.
     let visited = history.guids();
+    let current_guid = selection.guid.or(interact.guid);
     let back = reverse
         .then(|| pick_back(&visited, &pool, selection.guid))
         .flatten();
-    let (entity, guid, wrapped) = match back {
-        Some(i) => (pool[i].entity, pool[i].guid, false),
+    let (entity, guid, kind, wrapped) = match back {
+        Some(i) => (pool[i].entity, pool[i].guid, pool[i].kind, false),
         None => {
-            let Some((i, wrapped)) = pick_forward(&pool, &visited, selection.guid) else {
+            let Some((i, wrapped)) = pick_forward(&pool, &visited, current_guid) else {
                 return Owed::default();
             };
-            (pool[i].entity, pool[i].guid, wrapped)
+            (pool[i].entity, pool[i].guid, pool[i].kind, wrapped)
         }
     };
     // `0x4941e6`: the pick goes to `SelectTarget`, whose front may bind it to the cursor's cast
@@ -878,6 +1061,8 @@ pub(super) fn cycle(
     // past the pick whatever became of it; the history, which stands in for the index, records it
     // as visited without a selection to push.
     if front.takes(entity, guid, seam.slots.targeting()) {
+        interact.clear_target();
+        interact.bind_selection(selection.guid);
         if wrapped {
             history.visited.clear();
         }
@@ -887,28 +1072,50 @@ pub(super) fn cycle(
     if wrapped {
         history.visited.clear();
     }
-    // The outgoing selection joins the history (`TargetPriorityContinueFromManualTarget`).
-    if let Some(old) = selection.guid {
+    // The outgoing normal or interaction target joins the history.
+    if let Some(old) = current_guid {
         history.push(old, now);
     }
-    let old_latches = latches_on(&scan.relations, selection.guid);
-    let (out, owed) = commit_owing(
-        selection,
-        seam,
-        Some(entity),
-        guid,
-        scan.store_at(entity),
-        // `IsSelectable`'s `CREATEDBY` clause reads it.
-        scan.self_guid(),
-        // `Attack 0x5ecb70`'s validation, which a mode-2 pick fails (reaction >= 4 against
-        // `CanAttack`'s < 4). A duelling friendly passes `CanAttack`'s duel arm, which reads no
-        // reaction, so the reference's `Attack` would re-swing at it; here it gets none.
-        side == ScanSide::Enemy,
-        old_latches,
-    );
-    if out.changed {
+
+    let (selection_changed, owed) = if matches!(kind, EntityKind::Unit | EntityKind::Player) {
+        // Units use the normal WoW selection slot; leave no stale interaction target behind.
+        interact.clear_target();
+        let old_latches = latches_on(&scan.relations, selection.guid);
+        let (out, owed) = commit_owing(
+            selection,
+            seam,
+            Some(entity),
+            guid,
+            scan.store_at(entity),
+            scan.self_guid(),
+            // The standalone Smart scan finds hostiles but does not start an automatic attack.
+            side == ScanSide::Enemy,
+            old_latches,
+        );
+        if out.changed {
+            history.push(guid, now);
+        }
+        (out.changed, owed)
+    } else {
+        // Corpses and GameObjects live in the non-selectable interaction slot, not Selection.
+        let send = if selection.guid.is_some() {
+            super::click::deselect_owing(selection, seam)
+        } else {
+            None
+        };
+        interact.target = Some(entity);
+        interact.guid = Some(guid);
         history.push(guid, now);
-    }
+        (
+            true,
+            Owed {
+                send,
+                ..Owed::default()
+            },
+        )
+    };
+    interact.bind_selection(selection.guid);
+
     if trace {
         info!(
             "tab-trace: pick {guid:#x} \"{}\"{} — {}",
@@ -916,7 +1123,7 @@ pub(super) fn cycle(
                 .resolve_unit(guid, None, Ask::Read)
                 .unwrap_or("?"),
             if wrapped { " (wrapped)" } else { "" },
-            if out.changed {
+            if selection_changed {
                 "selection changed"
             } else {
                 "NO-OP (already the selection)"
@@ -934,6 +1141,7 @@ pub(crate) struct AttackPick<'w, 's> {
     scan: TargetScan<'w, 's>,
     history: ResMut<'w, TabHistory>,
     time: Res<'w, Time>,
+    interact: ResMut<'w, super::InteractTarget>,
     /// The `SelectTarget` returns ahead of the validator's two selecting calls.
     front: super::front::SelectFront<'w, 's>,
 }
@@ -972,10 +1180,13 @@ impl AttackPick<'_, '_> {
             return cycle(
                 ScanSide::Enemy,
                 false,
+                None,
+                false,
                 self.time.elapsed_secs_f64(),
                 &self.scan,
                 &mut self.history,
                 selection,
+                &mut self.interact,
                 seam,
                 &mut self.front,
             );
@@ -1743,8 +1954,11 @@ mod tests {
         Candidate {
             entity: Entity::PLACEHOLDER,
             guid,
+            kind: EntityKind::Unit,
+            in_view: on_screen,
             on_screen,
             score,
+            friend_priority: 2,
         }
     }
 
@@ -1770,6 +1984,34 @@ mod tests {
 
     /// No combat lock: an attacker in the pool never shrinks it.
     #[test]
+    fn friend_scan_prioritizes_party_before_other_raid_members() {
+        let mut party = cand(1, 10.0, true);
+        party.friend_priority = 0;
+        let mut other_subgroup = cand(2, -10.0, true);
+        other_subgroup.friend_priority = 1;
+        let mut unrelated = cand(3, -20.0, true);
+        unrelated.friend_priority = 2;
+
+        let mut candidates = [unrelated, other_subgroup, party];
+        candidates.sort_by(candidate_order);
+        assert_eq!(
+            candidates.map(|candidate| candidate.guid),
+            [1, 2, 3],
+            "same-party members beat closer-looking raid members within the same screen tier"
+        );
+
+        // The usual visible-target tier still outranks a party member outside the viewport.
+        let mut offscreen_party = party;
+        offscreen_party.in_view = false;
+        offscreen_party.on_screen = false;
+        let mut visible_raid = other_subgroup;
+        visible_raid.score = 100.0;
+        let mut candidates = [offscreen_party, visible_raid];
+        candidates.sort_by(candidate_order);
+        assert_eq!(candidates.map(|candidate| candidate.guid), [2, 1]);
+    }
+
+    #[test]
     fn tier_pool_never_locks() {
         let mut v = [cand(1, 0.1, false), cand(2, 5.0, true), cand(3, 0.5, true)];
         v.sort_by(candidate_order);
@@ -1780,15 +2022,43 @@ mod tests {
         );
 
         // Tier: with any on-screen candidate, off-screen ones drop out of the pool.
-        let pool = select_pool(&v);
+        let pool = select_pool(&v, false);
         assert_eq!(pool.iter().map(|c| c.guid).collect::<Vec<_>>(), [3, 2]);
-        // No on-screen candidates at all: the fallback tier is everything.
+        // No on-screen candidates at all: stock TargetNearest's fallback tier is everything.
         let off = [cand(1, 0.3, false), cand(2, 0.1, false)];
-        assert_eq!(select_pool(&off).len(), 2);
+        assert_eq!(select_pool(&off, false).len(), 2);
+
+        // R3 excludes candidates outside the actual viewport, but keeps an in-view point in the
+        // outer edge band when no point lies in the pulled-in priority region.
+        let mut edge = cand(4, 0.4, false);
+        edge.in_view = true;
+        assert_eq!(
+            select_pool(&[off[0], edge], true)
+                .iter()
+                .map(|candidate| candidate.guid)
+                .collect::<Vec<_>>(),
+            [4],
+            "visible edge fallback survives while the off-view candidate is removed"
+        );
+        assert!(
+            select_pool(&off, true).is_empty(),
+            "R3 must not fall back to targets behind/outside the camera viewport"
+        );
+
+        let mut visible_priority = cand(5, 0.8, true);
+        visible_priority.in_view = true;
+        assert_eq!(
+            select_pool(&[edge, visible_priority], true)
+                .iter()
+                .map(|candidate| candidate.guid)
+                .collect::<Vec<_>>(),
+            [5],
+            "the inner priority region still wins over the visible edge band"
+        );
 
         // With the attacker current and visited, the pick walks onto the peaceful mob.
         let mixed = [cand(1, -2.0, true), cand(2, 0.2, true)];
-        let pool = select_pool(&mixed);
+        let pool = select_pool(&mixed, false);
         assert_eq!(pool.len(), 2, "no combat lock — the full tier stays");
         assert_eq!(
             pick_forward(&pool, &[1], Some(1)),
@@ -2080,6 +2350,8 @@ mod tests {
 
         const NEAR: u64 = 0xA1;
         const FAR: u64 = 0xA2;
+        const EDGE: u64 = 0xA3;
+        const OUTSIDE: u64 = 0xA4;
         let mut world = World::new();
         world.init_resource::<Reputations>();
         world.init_resource::<NameCache>();
@@ -2095,7 +2367,12 @@ mod tests {
                 (F_MAXHEALTH, 100),
             ]),
         ));
-        for (guid, z) in [(NEAR, 15.0), (FAR, 30.0)] {
+        for (guid, z) in [
+            (NEAR, 15.0),
+            (FAR, 30.0),
+            (EDGE, 40.5),
+            (OUTSIDE, 41.5),
+        ] {
             world.spawn((
                 NetEntity {
                     kind: EntityKind::Unit,
@@ -2117,9 +2394,16 @@ mod tests {
                 })
                 .expect("the scan runs as a one-shot system")
         };
-        assert_eq!(pool(&mut world), [NEAR, FAR]);
+        assert_eq!(pool(&mut world), [NEAR, FAR, EDGE]);
         world.resource_mut::<super::super::TabRange>().0 = 20.0;
         assert_eq!(pool(&mut world), [NEAR]);
+
+        // R3 uses this same live CVar range; its separate viewport flag only narrows the
+        // candidate pool spatially and does not substitute a fixed radius.
+        let r3_range = world
+            .run_system_once(|scan: TargetScan| scan.configured_range())
+            .expect("the controller scan reads the configured range");
+        assert_eq!(r3_range, 20.0, "R3 shares targetNearestDistance");
     }
 
     #[test]

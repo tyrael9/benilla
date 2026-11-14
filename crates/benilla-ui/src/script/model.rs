@@ -98,6 +98,35 @@ pub(crate) struct StoredMouseEvent {
     pub(crate) at: (f32, f32),
 }
 
+/// Snapshot of platform controller input exposed to FrameXML and addons.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct GamepadLuaState {
+    pub connected: bool,
+    pub a: bool,
+    pub b: bool,
+    pub x: bool,
+    pub y: bool,
+    pub l: bool,
+    pub r: bool,
+    pub minus: bool,
+    pub plus: bool,
+    pub l3: bool,
+    pub r3: bool,
+    pub dpad_up: bool,
+    pub dpad_down: bool,
+    pub dpad_left: bool,
+    pub dpad_right: bool,
+    pub zl: f32,
+    pub zr: f32,
+    pub left_x: f32,
+    pub left_y: f32,
+    pub right_x: f32,
+    pub right_y: f32,
+    pub touch_move_x: f32,
+    pub touch_move_y: f32,
+    pub touch_move_active: bool,
+}
+
 #[derive(Clone)]
 pub(crate) struct Model {
     /// Which FrameScript state this VM is: it picks the event table and the frame types.
@@ -105,6 +134,15 @@ pub(crate) struct Model {
     /// [`super::UiScript::session`], for a handle made inside a verb
     /// ([`super::UiScript::reentrant`]).
     pub(crate) session: u64,
+    /// Latest platform controller snapshot, copied in by the app once per frame.
+    pub(crate) gamepad: GamepadLuaState,
+    /// Touch-stick preferences configured by the mobile addon.
+    pub(crate) touch_stick_center_x: f32,
+    pub(crate) touch_stick_center_y: f32,
+    pub(crate) touch_stick_radius: f32,
+    pub(crate) touch_stick_travel: f32,
+    pub(crate) touch_stick_enabled: bool,
+    pub(crate) touch_stick_unlocked: bool,
     /// Every discovered addon in load order: the AddOn API's registry, filled at world entry.
     pub(crate) addons: Vec<super::addon::AddOnInfo>,
     /// The Lua index space into `addons`, a title-sorted, hidden-filtered list (`0x51da70`).
@@ -1335,6 +1373,15 @@ impl Model {
         Model {
             vm: super::glue::VmKind::InGame,
             session: 0,
+            gamepad: GamepadLuaState::default(),
+            // Match BenillaMobile's defaults, but remain disabled until that addon explicitly
+            // opts into the movement stick. No invisible touch zone should consume login clicks.
+            touch_stick_center_x: 132.0,
+            touch_stick_center_y: 136.0,
+            touch_stick_radius: 112.0,
+            touch_stick_travel: 63.0,
+            touch_stick_enabled: false,
+            touch_stick_unlocked: false,
             addons: Vec::new(),
             addon_index: Vec::new(),
             addon_reply: None,

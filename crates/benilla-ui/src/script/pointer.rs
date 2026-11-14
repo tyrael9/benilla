@@ -140,6 +140,45 @@ impl UiScript {
             .is_some_and(|h| is_world_handle(&model, *h))
     }
 
+    /// Whether a touch at `(x, y)` is over a real UI control that should take priority over
+    /// the mobile movement stick. Plain mouse-enabled containers and the WorldFrame remain
+    /// transparent, so a large panel cannot reserve the whole stick zone.
+    pub fn hit_test_is_interactive(&self, x: f32, y: f32) -> bool {
+        let model = self.model_ref();
+        let sorted = order::pick_order(&model.arena);
+        order::hit_test(&sorted, |fh| {
+            let Some(frame) = model.arena.frame(fh) else {
+                return false;
+            };
+            let control = matches!(
+                frame.kind,
+                crate::widget::FrameKind::Button
+                    | crate::widget::FrameKind::LootButton
+                    | crate::widget::FrameKind::CheckButton
+                    | crate::widget::FrameKind::EditBox
+                    | crate::widget::FrameKind::Slider
+                    | crate::widget::FrameKind::ColorSelect
+                    | crate::widget::FrameKind::Minimap
+            );
+            control
+                && model.arena.is_mouse_enabled(fh)
+                && !model.nameplates.vetoes(fh)
+                && frame_contains(&model, fh, x, y)
+        })
+        .is_some()
+    }
+
+    /// Whether the topmost mouse hit at `(x, y)` is an EditBox.
+    pub fn hit_test_is_editbox(&self, x: f32, y: f32) -> bool {
+        let Some(hit) = self.hit_test_frame(x, y) else {
+            return false;
+        };
+        self.model_ref()
+            .arena
+            .frame(hit)
+            .is_some_and(|frame| frame.kind == crate::widget::FrameKind::EditBox)
+    }
+
     /// The handle of the frame that captures `(x, y)`, for a caller that checks it against a
     /// handle set taken earlier (an anonymous frame has no name). Needs [`Self::resolve`] first.
     pub fn hit_test_frame(&self, x: f32, y: f32) -> Option<FrameHandle> {

@@ -3,8 +3,9 @@
 //!
 //! 1. `$WOW_DATA`. Set and empty (`WOW_DATA=`) means no install and ends the search, so the
 //!    no-install path runs on a machine that has one.
-//! 2. `<project folder>/WoW/Data`, `dev` builds only ([`project_folder`]).
-//! 3. `<exe dir>/Data`, then `<exe dir>/WoW/Data`, the release layouts.
+//! 2. The writable iOS app-container copy, seeded once from the bundle.
+//! 3. `<project folder>/WoW/Data`, `dev` builds only ([`project_folder`]).
+//! 4. `<exe dir>/Data`, then `<exe dir>/WoW/Data`, the release layouts.
 //!
 //! `dev` is a default feature here, so every dependent declares `default-features = false` and
 //! re-exports it; otherwise feature unification puts the source-tree path in a player build.
@@ -51,6 +52,241 @@ fn benilla_checkout() -> Option<&'static Path> {
     Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2)
 }
 
+#[cfg(target_os = "ios")]
+pub fn prepare_ios_data() {
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return;
+    };
+    let Some(bundle) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf))
+    else {
+        return;
+    };
+    let bundled = bundle.join("Data");
+    if !bundled.is_dir() {
+        return;
+    }
+    let persistent = ios_data_dir(&home);
+    if let Err(error) = seed_ios_data(&bundled, &persistent) {
+        eprintln!(
+            "benilla: could not prepare persistent WoW Data at {}: {error}",
+            persistent.display()
+        );
+    }
+}
+
+#[cfg(any(target_os = "ios", test))]
+fn ios_data_dir(home: &Path) -> PathBuf {
+    ios_support_root(home).join("Data")
+}
+
+#[cfg(test)]
+fn ios_addons_dir(home: &Path) -> PathBuf {
+    ios_config_dir(home).join("AddOns")
+}
+
+#[cfg(any(target_os = "ios", test))]
+fn ios_addons_dir_with_override(home: &Path, config_dir: Option<PathBuf>) -> PathBuf {
+    config_dir
+        .unwrap_or_else(|| ios_config_dir(home))
+        .join("AddOns")
+}
+
+#[cfg(any(target_os = "ios", test))]
+fn ios_support_root(home: &Path) -> PathBuf {
+    home.join("Library/Application Support/Benilla")
+}
+
+#[cfg(any(target_os = "ios", test))]
+fn ios_config_dir(home: &Path) -> PathBuf {
+    ios_support_root(home).join("benilla-config")
+}
+
+// The ready marker means the persistent tree was bootstrapped, not that it should
+// forever ignore newer files bundled by an app update. Merge changed and new packaged files,
+// preserving files not shipped by this app; the MPQs are copied only when their size or mtime
+// changes. The marker is written only after the resulting patch chain opens.
+#[cfg(any(target_os = "ios", test))]
+fn seed_ios_data(bundled: &Path, persistent: &Path) -> std::io::Result<()> {
+    let marker = persistent.join(".benilla-ready");
+    let ready = marker.is_file();
+    if persistent.is_dir() {
+        // An unmarked directory may be an older user's partial install. Adopt it only if it is
+        // already a readable chain; never merge into (or destroy) an invalid pre-existing tree.
+        if !ready && crate::Chain::open(persistent).is_err() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "an existing unmarked Data directory is not a readable patch chain; leaving it untouched",
+            ));
+        }
+        refresh_ios_data(bundled, persistent)?;
+        crate::Chain::open(persistent).map_err(|error| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("the refreshed persistent Data directory is not a readable patch chain: {error:#}"),
+            )
+        })?;
+        return if ready {
+            Ok(())
+        } else {
+            std::fs::write(marker, b"ready\n")
+        };
+    }
+    let parent = persistent.parent().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "Data path has no parent")
+    })?;
+    std::fs::create_dir_all(parent)?;
+    let staging = parent.join("Data.installing");
+    remove_path_if_exists(&staging)?;
+    if let Err(error) = refresh_ios_data(bundled, &staging) {
+        let _ = remove_path_if_exists(&staging);
+        return Err(error);
+    }
+    if let Err(error) = crate::Chain::open(&staging) {
+        let _ = remove_path_if_exists(&staging);
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("the bundled Data directory is not a readable patch chain: {error:#}"),
+        ));
+    }
+    if let Err(error) = std::fs::rename(&staging, persistent) {
+        let _ = remove_path_if_exists(&staging);
+        return Err(error);
+    }
+    // If this write fails, the next launch validates and refreshes the promoted directory.
+    std::fs::write(marker, b"ready\n")
+}
+
+/// Merge the package's Data files into the writable copy, without deleting local extras.
+#[cfg(any(target_os = "ios", test))]
+fn refresh_ios_data(bundled: &Path, persistent: &Path) -> std::io::Result<()> {
+    sync_data_tree(bundled, persistent)
+}
+
+/// Copy a Data tree incrementally. Source modification times are retained on copied files so
+/// the next app launch can skip unchanged MPQs rather than copying gigabytes again.
+#[cfg(any(target_os = "ios", test))]
+fn sync_data_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if from.is_dir() {
+            sync_data_tree(&from, &to)?;
+        } else {
+            copy_data_file_if_changed(&from, &to)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(any(target_os = "ios", test))]
+fn copy_data_file_if_changed(from: &Path, to: &Path) -> std::io::Result<()> {
+    let source = std::fs::metadata(from)?;
+    match std::fs::metadata(to) {
+        Ok(existing)
+            if source.len() == existing.len()
+                && source
+                    .modified()
+                    .ok()
+                    .is_some_and(|modified| existing.modified().ok() == Some(modified)) =>
+        {
+            return Ok(());
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+
+    let parent = to.parent().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "Data file path has no parent")
+    })?;
+    std::fs::create_dir_all(parent)?;
+    let name = to.file_name().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "Data file has no name")
+    })?;
+    let staging = parent.join(format!(".{}.benilla-sync", name.to_string_lossy()));
+    remove_path_if_exists(&staging)?;
+
+    let result = (|| {
+        std::fs::copy(from, &staging)?;
+        if let Ok(modified) = source.modified() {
+            std::fs::File::open(&staging)?
+                .set_times(std::fs::FileTimes::new().set_modified(modified))?;
+        }
+        // On iOS this replaces one file atomically; an interrupted copy never truncates the
+        // previously usable archive or loose file.
+        std::fs::rename(&staging, to)
+    })();
+    if result.is_err() {
+        let _ = remove_path_if_exists(&staging);
+    }
+    result
+}
+
+#[cfg(target_os = "ios")]
+pub fn prepare_ios_addons() {
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return;
+    };
+    let Some(bundle) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf))
+    else {
+        return;
+    };
+    let bundled = bundle.join("Interface/AddOns");
+    if !bundled.is_dir() {
+        return;
+    }
+    let persistent = ios_addons_dir_with_override(
+        &home,
+        std::env::var_os("BENILLA_HOME").map(PathBuf::from),
+    );
+    if let Err(error) = refresh_ios_addons(&bundled, &persistent) {
+        eprintln!(
+            "benilla: could not refresh AddOns at {}: {error}",
+            persistent.display()
+        );
+    }
+}
+
+// Merge the app-shipped AddOns into the persistent root; unrelated addons and player state stay put.
+#[cfg(any(target_os = "ios", test))]
+fn refresh_ios_addons(bundled: &Path, persistent: &Path) -> std::io::Result<()> {
+    // Merge instead of swapping the whole root: user-installed addons not shipped in this app
+    // remain available. Files that are part of the bundled addon set are refreshed in place;
+    // SavedVariables and the rest of benilla-config live outside this tree.
+    copy_dir_recursive(bundled, persistent)
+}
+
+#[cfg(any(target_os = "ios", test))]
+fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if from.is_dir() {
+            copy_dir_recursive(&from, &to)?;
+        } else {
+            std::fs::copy(&from, &to)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(any(target_os = "ios", test))]
+fn remove_path_if_exists(path: &Path) -> std::io::Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_dir() => std::fs::remove_dir_all(path),
+        Ok(_) => std::fs::remove_file(path),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
 /// The vanilla `Data` directory, or `None` when there is no install. Uncached, so a `$WOW_DATA`
 /// change is seen.
 pub fn wow_data() -> Option<PathBuf> {
@@ -59,8 +295,14 @@ pub fn wow_data() -> Option<PathBuf> {
 
 /// Every place [`wow_data`] looks, in order, whether or not it exists, for a "looked in" message.
 pub fn candidates() -> Vec<PathBuf> {
+    #[cfg(target_os = "ios")]
+    let ios_data = std::env::var_os("HOME").map(|home| ios_data_dir(&PathBuf::from(home)));
+    #[cfg(not(target_os = "ios"))]
+    let ios_data = None;
+
     candidates_from(
         std::env::var_os("WOW_DATA").map(PathBuf::from),
+        ios_data,
         project_folder(),
         std::env::current_exe()
             .ok()
@@ -72,10 +314,11 @@ pub fn candidates() -> Vec<PathBuf> {
 /// answer for every test running beside it. `tests/wow_data_env.rs` covers the real read.
 fn candidates_from(
     override_dir: Option<PathBuf>,
+    ios_data: Option<PathBuf>,
     project: Option<&Path>,
     exe_dir: Option<PathBuf>,
 ) -> Vec<PathBuf> {
-    let mut out = Vec::with_capacity(4);
+    let mut out = Vec::with_capacity(5);
 
     // 1. The override; set and empty is no install at all, even in a dev build
     // (`WOW_DATA= cargo play` runs as a player without data).
@@ -84,6 +327,11 @@ fn candidates_from(
             return Vec::new();
         }
         out.push(over);
+    }
+
+    // iOS's writable app-container copy is preferred over the read-only app bundle.
+    if let Some(data) = ios_data {
+        out.push(data);
     }
 
     // 2. The project folder, dev builds only.
@@ -209,6 +457,7 @@ mod tests {
     fn probe(over: Option<&str>, exe: Option<&str>) -> Vec<PathBuf> {
         candidates_from(
             over.map(PathBuf::from),
+            None,
             project_folder(),
             exe.map(PathBuf::from),
         )
@@ -242,7 +491,12 @@ mod tests {
 
         // The winner depends on the build (dev puts the project folder first), so assert only
         // that it is not the ghost and exists.
-        let chosen = candidates_from(Some(ghost.clone()), project_folder(), Some(tmp.clone()))
+        let chosen = candidates_from(
+            Some(ghost.clone()),
+            None,
+            project_folder(),
+            Some(tmp.clone()),
+        )
             .into_iter()
             .find(|c| c.is_dir());
         assert_ne!(
@@ -256,6 +510,189 @@ mod tests {
         );
 
         std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn ios_data_and_addons_live_in_the_persistent_application_support_container() {
+        let home = Path::new("/var/mobile/Containers/Data/Application/example");
+        assert_eq!(
+            ios_data_dir(home),
+            home.join("Library/Application Support/Benilla/Data")
+        );
+        assert_eq!(
+            ios_addons_dir(home),
+            home.join("Library/Application Support/Benilla/benilla-config/AddOns")
+        );
+        assert_eq!(
+            ios_addons_dir_with_override(home, Some(PathBuf::from("/custom/config"))),
+            PathBuf::from("/custom/config/AddOns")
+        );
+    }
+
+    #[test]
+    fn an_ios_data_candidate_follows_an_explicit_override_and_precedes_the_bundle() {
+        let persistent = PathBuf::from("/container/Library/Application Support/Benilla/Data");
+        let candidates = candidates_from(
+            Some(PathBuf::from("/explicit/Data")),
+            Some(persistent.clone()),
+            None,
+            Some(PathBuf::from("/app/Benilla.app")),
+        );
+        assert_eq!(
+            candidates,
+            vec![
+                PathBuf::from("/explicit/Data"),
+                persistent,
+                PathBuf::from("/app/Benilla.app/Data"),
+                PathBuf::from("/app/Benilla.app/WoW/Data"),
+            ]
+        );
+    }
+
+    #[test]
+    fn refreshing_bundled_addon_files_updates_only_matching_files() {
+        let tmp = std::env::temp_dir().join(format!("benilla-ios-addon-update-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let bundled = tmp.join("bundle/AddOns/Managed");
+        let persistent = tmp.join("container/benilla-config/AddOns");
+        std::fs::create_dir_all(&bundled).unwrap();
+        std::fs::create_dir_all(persistent.join("Managed")).unwrap();
+        std::fs::create_dir_all(persistent.join("Custom")).unwrap();
+        std::fs::write(bundled.join("Managed.lua"), b"updated").unwrap();
+        std::fs::write(persistent.join("Managed/Managed.lua"), b"old").unwrap();
+        std::fs::write(persistent.join("Custom/Custom.toc"), b"custom").unwrap();
+
+        refresh_ios_addons(&tmp.join("bundle/AddOns"), &persistent).unwrap();
+
+        assert_eq!(
+            std::fs::read(persistent.join("Managed/Managed.lua")).unwrap(),
+            b"updated"
+        );
+        assert!(
+            persistent.join("Custom/Custom.toc").is_file(),
+            "custom addons absent from the bundle must survive refresh"
+        );
+        std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    #[test]
+    fn refreshing_bundled_data_updates_changed_files_adds_missing_files_and_preserves_extras() {
+        use std::time::{Duration, UNIX_EPOCH};
+
+        let tmp = std::env::temp_dir().join(format!("benilla-ios-data-refresh-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let bundled = tmp.join("bundle/Data");
+        let persistent = tmp.join("container/Data");
+        std::fs::create_dir_all(&bundled).unwrap();
+        std::fs::create_dir_all(&persistent).unwrap();
+
+        let bundled_eula = bundled.join("eula.html");
+        let bundled_tos = bundled.join("tos.html");
+        let old_eula = persistent.join("eula.html");
+        let local_extra = persistent.join("player-local.txt");
+        std::fs::write(&bundled_eula, b"new agreement").unwrap();
+        std::fs::write(&bundled_tos, b"new terms").unwrap();
+        std::fs::write(&old_eula, b"old agreement").unwrap();
+        std::fs::write(&local_extra, b"keep this").unwrap();
+
+        let older = UNIX_EPOCH + Duration::from_secs(10);
+        let newer = UNIX_EPOCH + Duration::from_secs(20);
+        std::fs::File::open(&bundled_eula)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(newer))
+            .unwrap();
+        std::fs::File::open(&old_eula)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(older))
+            .unwrap();
+
+        refresh_ios_data(&bundled, &persistent).unwrap();
+        assert_eq!(std::fs::read(&old_eula).unwrap(), b"new agreement");
+        assert_eq!(std::fs::read(persistent.join("tos.html")).unwrap(), b"new terms");
+        assert_eq!(std::fs::read(&local_extra).unwrap(), b"keep this");
+        assert_eq!(
+            std::fs::metadata(&old_eula).unwrap().modified().unwrap(),
+            newer,
+            "the source mtime is retained so the next update can skip the file"
+        );
+        // A second merge is idempotent and leaves user-added files alone.
+        refresh_ios_data(&bundled, &persistent).unwrap();
+        assert_eq!(std::fs::read(&old_eula).unwrap(), b"new agreement");
+        assert_eq!(std::fs::read(&local_extra).unwrap(), b"keep this");
+
+        std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    #[test]
+    fn failed_ios_data_bootstrap_preserves_an_existing_unmarked_directory() {
+        let tmp = std::env::temp_dir().join(format!("benilla-ios-data-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let bundled = tmp.join("bundle/Data");
+        let persistent = tmp.join("container/Library/Application Support/Benilla/Data");
+        std::fs::create_dir_all(&bundled).unwrap();
+        std::fs::write(bundled.join("not-an-mpq.txt"), b"bundle").unwrap();
+        std::fs::create_dir_all(&persistent).unwrap();
+        let existing = persistent.join("keep-me.txt");
+        std::fs::write(&existing, b"existing player data").unwrap();
+
+        let error = seed_ios_data(&bundled, &persistent).unwrap_err();
+        assert_eq!(
+            error.kind(),
+            std::io::ErrorKind::InvalidData,
+            "the invalid old directory must be reported, not silently replaced"
+        );
+        assert_eq!(
+            std::fs::read(&existing).unwrap(),
+            b"existing player data",
+            "a pre-existing directory is never removed or overwritten"
+        );
+        assert!(
+            !persistent.join(".benilla-ready").exists(),
+            "a failed import must not be marked ready"
+        );
+        assert!(!persistent.parent().unwrap().join("Data.installing").exists());
+        std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    #[test]
+    fn bootstrap_copy_recurses_without_touching_its_source() {
+        let tmp = std::env::temp_dir().join(format!("benilla-ios-copy-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let source = tmp.join("bundle/Data");
+        let target = tmp.join("container/Data.installing");
+        std::fs::create_dir_all(source.join("nested")).unwrap();
+        std::fs::write(source.join("nested/patch.MPQ"), b"patch-bytes").unwrap();
+        copy_dir_recursive(&source, &target).unwrap();
+        assert_eq!(
+            std::fs::read(target.join("nested/patch.MPQ")).unwrap(),
+            b"patch-bytes"
+        );
+        assert!(source.join("nested/patch.MPQ").is_file());
+        std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    #[test]
+    fn refreshing_ios_addons_preserves_saved_variables_and_unbundled_addons() {
+        let tmp = std::env::temp_dir().join(format!("benilla-ios-addons-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let home = tmp.join("Library/Application Support/Benilla/benilla-config");
+        let persistent = home.join("AddOns");
+        let saved = home.join("saved/Example.lua");
+        let bundled = tmp.join("bundle/Interface/AddOns");
+        std::fs::create_dir_all(persistent.join("OldAddon")).unwrap();
+        std::fs::write(persistent.join("OldAddon/OldAddon.toc"), b"old").unwrap();
+        std::fs::create_dir_all(saved.parent().unwrap()).unwrap();
+        std::fs::write(&saved, b"player data").unwrap();
+        std::fs::create_dir_all(bundled.join("NewAddon")).unwrap();
+        std::fs::write(bundled.join("NewAddon/NewAddon.toc"), b"new").unwrap();
+        refresh_ios_addons(&bundled, &persistent).unwrap();
+        assert!(
+            persistent.join("OldAddon/OldAddon.toc").is_file(),
+            "an addon not bundled with this app must not be deleted"
+        );
+        assert!(persistent.join("NewAddon/NewAddon.toc").is_file());
+        assert_eq!(std::fs::read(&saved).unwrap(), b"player data");
+        std::fs::remove_dir_all(&tmp).unwrap();
     }
 
     #[test]
@@ -308,7 +745,7 @@ mod tests {
         );
 
         let launcher = Path::new("/home/player/hello-mod");
-        let c = candidates_from(None, Some(launcher), Some(PathBuf::from("/games/benilla")));
+        let c = candidates_from(None, None, Some(launcher), Some(PathBuf::from("/games/benilla")));
         assert_eq!(
             c,
             vec![

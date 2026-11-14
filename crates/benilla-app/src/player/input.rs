@@ -2,6 +2,8 @@
 //! and [`move_axes`], the netted axes with the autorun latch. Netting once keeps the direction,
 //! the speed, the swim amounts and the streamed flags in agreement.
 
+use bevy::math::Vec2;
+
 use super::{camera, state, Player};
 
 /// What [`look_input`] read off the mouse and the bindings, before the look session runs.
@@ -109,11 +111,11 @@ pub(super) struct MoveAxes {
     pub mouselook: bool,
     /// A keyboard turn is held and allowed (a stun refuses it).
     pub turning: bool,
+    /// The analog left stick after its radial deadzone.
+    pub analog: Vec2,
     /// The reference's `flags & 0xf`, off the net axes: W+S neither streams nor moves.
     pub translating: bool,
-    /// The raw strafe and turn keys, for the swim amounts and the wire's turn bits.
-    pub strafe_left: bool,
-    pub strafe_right: bool,
+    /// Raw turn keys, for the wire's turn bits.
     pub turn_left: bool,
     pub turn_right: bool,
 }
@@ -146,6 +148,8 @@ pub(super) fn toggle_autorun(
 pub(super) fn move_axes(
     binds: &crate::bindings::BindingsState,
     player: &mut Player,
+    analog: Vec2,
+    camera_yaw: f32,
     both_buttons: bool,
     // The reference's input predicates `0x514560` and `0x5145b0` (`state::may_translate`,
     // `state::may_turn`); death takes both down.
@@ -153,7 +157,7 @@ pub(super) fn move_axes(
     may_turn: bool,
 ) -> MoveAxes {
     let auto_forward = player.auto_forward;
-    move_axes_with(
+    let mut axes = move_axes_with(
         binds,
         &mut player.autorun,
         auto_forward,
@@ -161,7 +165,20 @@ pub(super) fn move_axes(
         both_buttons,
         may_translate,
         may_turn,
-    )
+    );
+
+    // The caller supplies the already-deadzoned SDL/GameController left stick. It uses
+    // WASD semantics and faces the camera while moving, rather than using A/D turn bindings.
+    if analog != Vec2::ZERO {
+        axes.fwd = discrete_axis(analog.y);
+        axes.side = discrete_axis(analog.x);
+        if may_turn {
+            player.face_yaw = camera_yaw;
+        }
+    }
+    axes.analog = analog;
+    axes.translating = axes.fwd != 0 || axes.side != 0 || analog != Vec2::ZERO;
+    axes
 }
 
 /// [`move_axes`] over the autorun bit `autorun` and the auto-move's forward `auto_forward`: a
@@ -244,13 +261,20 @@ pub(super) fn move_axes_with(
     MoveAxes {
         fwd: fwd_axis,
         side: side_axis,
+        analog: Vec2::ZERO,
         mouselook,
         turning,
         translating,
-        strafe_left,
-        strafe_right,
         turn_left,
         turn_right,
+    }
+}
+
+fn discrete_axis(value: f32) -> i32 {
+    if value.abs() < 0.15 {
+        0
+    } else {
+        value.signum() as i32
     }
 }
 
@@ -311,8 +335,58 @@ mod tests {
         let binds = BindingsState::after_calls(earlier, now);
         let autorun_on = toggle_autorun(&binds, None, player);
         let both = both_engaged(&binds);
-        move_axes(&binds, player, binds.steering(), !rooted, true);
+        let camera_yaw = player.face_yaw;
+        move_axes(
+            &binds,
+            player,
+            Vec2::ZERO,
+            camera_yaw,
+            binds.steering(),
+            !rooted,
+            true,
+        );
         cancels_cast(&binds, autorun_on, both, true)
+    }
+
+    #[test]
+    fn analog_movement_uses_camera_facing_and_preserves_stick_magnitude() {
+        let binds = BindingsState::default();
+        let mut player = Player::default();
+        let camera_yaw = 1.25;
+        let axes = move_axes(
+            &binds,
+            &mut player,
+            Vec2::new(0.6, 0.8),
+            camera_yaw,
+            false,
+            true,
+            true,
+        );
+
+        assert_eq!(axes.fwd, 1);
+        assert_eq!(axes.side, 1);
+        assert_eq!(axes.analog, Vec2::new(0.6, 0.8));
+        assert!(axes.translating);
+        assert!((player.face_yaw - camera_yaw).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn an_idle_analog_axis_does_not_claim_translation() {
+        let binds = BindingsState::default();
+        let mut player = Player::default();
+        let camera_yaw = player.face_yaw;
+        let axes = move_axes(
+            &binds,
+            &mut player,
+            Vec2::ZERO,
+            camera_yaw,
+            false,
+            true,
+            true,
+        );
+
+        assert!(!axes.translating);
+        assert_eq!(axes.analog, Vec2::ZERO);
     }
 
     /// `0x515090` cancels on the command press (`0x5150ce`), and nothing between the press and

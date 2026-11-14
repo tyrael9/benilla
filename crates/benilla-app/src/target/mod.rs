@@ -129,6 +129,62 @@ pub(crate) struct Selection {
     pub(crate) last: Option<u64>,
 }
 
+/// The controller's non-selectable interaction target. Corpses and GameObjects occupy the client's
+/// interact slot, never the normal Selection slot.
+#[derive(Resource, Default, Clone, Copy, Debug, PartialEq)]
+pub(crate) struct InteractTarget {
+    pub(crate) target: Option<Entity>,
+    pub(crate) guid: Option<u64>,
+    /// The ordinary selected unit when this interaction target was picked. A later manual or
+    /// scripted selection change invalidates the old GameObject/corpse target.
+    pub(crate) selection_guid: Option<u64>,
+}
+
+impl InteractTarget {
+    pub(crate) fn clear_target(&mut self) {
+        self.target = None;
+        self.guid = None;
+    }
+
+    pub(crate) fn bind_selection(&mut self, selection_guid: Option<u64>) {
+        self.selection_guid = selection_guid;
+    }
+
+    /// Drop an interaction target when normal WoW selection has changed since it was picked.
+    pub(crate) fn reconcile_selection(&mut self, selection_guid: Option<u64>) -> bool {
+        if self.selection_guid == selection_guid {
+            return false;
+        }
+        self.clear_target();
+        self.selection_guid = selection_guid;
+        true
+    }
+}
+
+#[cfg(test)]
+mod interact_target_tests {
+    use super::*;
+
+    #[test]
+    fn interaction_target_is_invalidated_by_a_normal_selection_change() {
+        let mut target = InteractTarget {
+            target: Some(Entity::PLACEHOLDER),
+            guid: Some(0xF110_0000_0000_0001),
+            ..Default::default()
+        };
+        assert!(!target.reconcile_selection(None));
+        assert!(target.reconcile_selection(Some(0x0000_0000_0000_1234)));
+        assert_eq!(target.target, None);
+        assert_eq!(target.guid, None);
+
+        target.target = Some(Entity::PLACEHOLDER);
+        target.guid = Some(0xF110_0000_0000_0002);
+        target.bind_selection(Some(0x0000_0000_0000_1234));
+        assert!(!target.reconcile_selection(Some(0x0000_0000_0000_1234)));
+        assert_eq!(target.target, Some(Entity::PLACEHOLDER));
+    }
+}
+
 /// This frame's character-model pick, by [`hover::update_hover`]. At most one slot is set: the
 /// reference makes one pick over all CGObjects and switches on type at the end (`0x480df0` →
 /// `0x7089c0`), and a corpse (`CGCorpse_C`) is not a unit, so it never answers as `target`.
@@ -317,6 +373,7 @@ impl Plugin for TargetPlugin {
         crate::field_callbacks::register(app);
         release::register(app);
         app.init_resource::<Selection>()
+            .init_resource::<InteractTarget>()
             .init_resource::<ClickConfig>()
             .init_resource::<AssistAttack>()
             .init_resource::<Hovered>()

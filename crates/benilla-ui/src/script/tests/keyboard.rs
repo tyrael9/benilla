@@ -2,6 +2,38 @@
 
 use super::common::script;
 
+/// Clearing the host-side focus keeps the typed value and raises the normal focus-lost
+/// event, just as EditBox:ClearFocus does.
+#[test]
+fn clearing_keyboard_focus_preserves_text_and_fires_focus_lost() {
+    let mut s = script();
+    s.run(
+        r#"
+        focusLost = 0
+        box = CreateFrame("EditBox", "KbDismissFocus")
+        box:SetAutoFocus(false)
+        box:SetText("account-name")
+        box:SetScript("OnEditFocusLost", function() focusLost = focusLost + 1 end)
+        box:SetFocus()
+    "#,
+    )
+    .unwrap();
+
+    assert!(s.has_keyboard_focus());
+    assert_eq!(s.focused_editbox_name().as_deref(), Some("KbDismissFocus"));
+    assert!(s.clear_keyboard_focus());
+    assert!(!s.has_keyboard_focus());
+    assert_eq!(s.focused_editbox_name(), None);
+    assert_eq!(
+        s.eval::<String>("return box:GetText()").unwrap(),
+        "account-name",
+        "dismissing the keyboard must not clear the account text"
+    );
+    assert_eq!(s.eval::<i64>("return focusLost").unwrap(), 1);
+    assert!(!s.clear_keyboard_focus(), "there is no focus to clear");
+    assert_eq!(s.eval::<i64>("return focusLost").unwrap(), 1);
+}
+
 /// Bucket membership (`0x76af00`) is the keyboard-enabled flag, which `SetScript` never sets.
 #[test]
 fn a_key_script_alone_does_not_put_a_frame_in_the_walk() {

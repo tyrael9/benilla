@@ -379,10 +379,27 @@ pub(super) struct SwimFrame {
     pub pitch: f32,
 }
 
+/// Build the normalized swim direction. The legacy SITORSTAND binding supplies an independent
+/// downward axis while the physical key/button is held; forward movement still follows swim pitch.
+fn travel_direction(
+    basis: (Vec3, Vec3),
+    pitch: f32,
+    amounts: (f32, f32),
+    descending: bool,
+) -> Vec3 {
+    let (sp, cp) = pitch.sin_cos();
+    let fwd_axis = basis.0 * cp + Vec3::Y * sp;
+    let mut v = fwd_axis * amounts.0 + basis.1 * amounts.1;
+    if descending {
+        v.y -= 1.0;
+    }
+    v.normalize_or_zero()
+}
+
 /// One swimming frame: the drunk pitch wobble, the pitched travel basis, the directional speed,
 /// the stroke rate and [`swim_step`]. `basis` is the level `(forward, right)` pair, `amounts` the
-/// netted `(fwd, side)` translation ([`translate_amounts`]), and `wobble` the drunk angle, zero
-/// when it must not apply.
+/// netted `(fwd, side)` translation ([`translate_amounts`]), `descending` the held legacy
+/// SITORSTAND input, and `wobble` the drunk angle, zero when it must not apply.
 pub(super) fn drive_step(
     player: &mut Player,
     time: &Time,
@@ -392,6 +409,7 @@ pub(super) fn drive_step(
     surface_y: Option<f32>,
     basis: (Vec3, Vec3),
     amounts: (f32, f32),
+    descending: bool,
     speeds: Option<benilla_protocol::MoveSpeeds>,
     move_speed: &super::MoveSpeed,
     wobble: f32,
@@ -404,13 +422,14 @@ pub(super) fn drive_step(
         player.mover_pitch = (player.mover_pitch + wobble * super::drunk::SWIM_PITCH_WOBBLE_SCALE)
             .clamp(-std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2);
     }
-    let mut pitch = player.mover_pitch;
-    // The travel basis (`0x7c5880`): forward is the facing pitched by the swim pitch, strafe stays
-    // level, and there is no vertical input; Space's one swim role is the jump.
-    let (sp, cp) = player.mover_pitch.sin_cos();
-    let fwd_axis = basis.0 * cp + Vec3::Y * sp;
-    let v = fwd_axis * swim_fwd + basis.1 * swim_side;
-    let dir3 = v.normalize_or_zero();
+    // The travel basis (`0x7c5880`): forward follows the pitched facing and strafe stays level.
+    // SITORSTAND adds an independent downward axis; Space keeps its existing swim-jump behavior.
+    let dir3 = travel_direction(basis, player.mover_pitch, amounts, descending);
+    let mut pitch = if descending && dir3 != Vec3::ZERO {
+        dir3.y.asin()
+    } else {
+        player.mover_pitch
+    };
     let rest_line = rest_line(player, surface_y);
     // The directional speed (`0x7c4c90`'s swim arm): backward takes `min(swimBack, swim)`,
     // forward and strafe the swim speed.
@@ -482,27 +501,32 @@ pub(super) fn translate_amounts(
         return (0.0, 0.0);
     }
     let swim_fwd = axes.fwd.signum() as f32;
-    let mut swim_side = 0.0_f32; // +right
-    if axes.strafe_right {
-        swim_side += 1.0;
-    }
-    if axes.strafe_left {
-        swim_side -= 1.0;
-    }
-    if axes.mouselook {
-        if axes.turn_right {
-            swim_side += 1.0;
-        }
-        if axes.turn_left {
-            swim_side -= 1.0;
-        }
-    }
+    // MoveAxes.side is already the final net strafe axis: gamepad left-stick X,
+    // keyboard Q/E, and A/D while mouselook. Keep swim consistent with land movement.
+    let swim_side = axes.side as f32;
     (swim_fwd, swim_side)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sit_or_stand_adds_a_downward_swim_axis_without_forward_motion() {
+        let basis = (Vec3::NEG_Z, Vec3::X);
+        assert_eq!(
+            travel_direction(basis, 0.0, (0.0, 0.0), true),
+            Vec3::NEG_Y
+        );
+        assert_eq!(
+            travel_direction(basis, 0.0, (0.0, 0.0), false),
+            Vec3::ZERO
+        );
+
+        let diagonal = travel_direction(basis, 0.0, (1.0, 0.0), true);
+        assert!((diagonal.length() - 1.0).abs() < 1e-6);
+        assert!(diagonal.z < 0.0 && diagonal.y < 0.0);
+    }
 
     /// `0x515010`: a net press starts its pitch once, a zero net stops it, a switch of direction
     /// with the latch set does nothing until the net passes zero, and TurnOrAction holds it.

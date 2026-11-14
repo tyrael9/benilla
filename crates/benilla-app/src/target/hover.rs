@@ -24,6 +24,13 @@ use benilla_world::view::WorldCamera;
 
 use super::{Hovered, HoveredObject, PickOcclusion};
 
+/// Opt-in diagnostics for the physical mouse's GameObject pick. Set
+/// `WOW_MOUSE_PICK_DEBUG=1` to compare the geometry hit with the world occlusion trace.
+fn mouse_pick_debug_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("WOW_MOUSE_PICK_DEBUG").is_some())
+}
+
 /// What the world trace casts against, as one [`SystemParam`]: the reference's `CWorld::Intersect`
 /// leg of the scene trace (`0x480df0`, mask `0x1000114`): the [`PickOccluder`] colliders, terrain
 /// and the WMO walk-bake faces (about the `0x84` reject mask), and the static doodads' drawn
@@ -85,14 +92,27 @@ pub(super) fn update_pick_occlusion(
     window: Query<&Window, With<PrimaryWindow>>,
     trace: OcclusionTrace,
     probe: Res<super::hover_probe::ProbeAim>,
+    virtual_mouse: Option<Res<crate::gamepad::GamepadVirtualMouse>>,
+    gamepad_state: Option<Res<crate::gamepad::GamepadSnapshot>>,
     mut occlusion: ResMut<PickOcclusion>,
 ) {
     *occlusion = PickOcclusion::default();
     let Ok(window) = window.single() else {
         return;
     };
-    // A cursorless window traces from the hover probe's aim, as the picks do.
-    let Some(cursor) = window.cursor_position().or_else(|| probe.now()) else {
+    // Match both hover pickers: touch owns the pointer first, then LT's virtual mouse, then the
+    // physical mouse. The cursorless hover probe is the final fallback.
+    let cursor = gamepad_state
+        .as_deref()
+        .and_then(|state| state.touch_world_pointer)
+        .or_else(|| {
+            virtual_mouse
+                .as_deref()
+                .and_then(|mouse| mouse.window_position)
+        })
+        .or_else(|| window.cursor_position())
+        .or_else(|| probe.now());
+    let Some(cursor) = cursor else {
         return;
     };
     let Some(ray) = cursor_ray(&camera, cursor) else {
@@ -515,6 +535,8 @@ pub(super) fn update_hover(
     window: Query<&Window, With<PrimaryWindow>>,
     rig: Res<CameraControl>,
     pointer_over_ui: Res<PointerOverUi>,
+    virtual_mouse: Option<Res<crate::gamepad::GamepadVirtualMouse>>,
+    gamepad_state: Option<Res<crate::gamepad::GamepadSnapshot>>,
     occlusion: Res<PickOcclusion>,
     // The unit whose plate holds the hover after this frame's UI walk.
     plate_hover: Res<crate::vplates::PlateHover>,
@@ -539,7 +561,16 @@ pub(super) fn update_hover(
         sticky.unit = None;
         return;
     }
-    let Some(cursor) = window.single().ok().and_then(Window::cursor_position) else {
+    let cursor = gamepad_state
+        .as_deref()
+        .and_then(|state| state.touch_world_pointer)
+        .or_else(|| {
+            virtual_mouse
+                .as_deref()
+                .and_then(|mouse| mouse.window_position)
+        })
+        .or_else(|| window.single().ok().and_then(Window::cursor_position));
+    let Some(cursor) = cursor else {
         return;
     };
     let Some(ray) = cursor_ray(&camera, cursor) else {
@@ -767,12 +798,80 @@ impl ObjectPicker<'_, '_> {
             );
         }
 
+        let mouse_debug = mouse_pick_debug_enabled();
+
         // Pass 1: the exact resident geometry, nearest wins.
-        let mut best: Option<(f32, Entity)> =
-            benilla_world::interact::cast_pick_ray(ray, pickable, parts, false)
-                .into_iter()
-                .next()
-                .map(|(e, h)| (h.distance, e));
+        let exact_hits =
+            benilla_world::interact::cast_pick_ray(ray, pickable, parts, false);
+        let mut best: Option<(f32, Entity)> = exact_hits
+            .first()
+            .map(|(e, h)| (h.distance, *e));
+        let exact = best;
+        let mut inflated = None;
+
+        // With mouse-pick diagnostics enabled, report the ordered resident-geometry hits, not
+        // only the nearest one. This makes it possible to see a closed/opened door in front of
+        // the chest it visually reveals, and whether the front object would pass mouseover.
+        if mouse_debug {
+            let mut seen = HashSet::new();
+            let rows: Vec<String> = exact_hits
+                .iter()
+                .filter_map(|(part, hit)| {
+                    let net = resolve_net(*part);
+                    if !seen.insert(net) {
+                        return None;
+                    }
+                    let guid = guids
+                        .get(net)
+                        .ok()
+                        .map_or_else(|| "?".to_string(), |g| format!("{:#x}", g.0));
+                    let Some(store) = stores.get(net).ok() else {
+                        return Some(format!(
+                            "{:.2}yd guid={} store=unavailable",
+                            hit.distance, guid
+                        ));
+                    };
+                    let tmpl = go_gate.templates.of(&store.0);
+                    let reaction = crate::target::cursor_mode::go_reaction(
+                        go_gate.factions.as_deref(),
+                        store.0.gameobject_faction(),
+                        self_store,
+                    );
+                    let eligible = crate::target::cursor_mode::mouseover_eligible(
+                        store.0.gameobject_type_id(),
+                        store.0.gameobject_flags(),
+                        store.0.gameobject_dynamic_flags(),
+                        tmpl.map(|t| t.highlight_column),
+                        reaction,
+                        crate::target::cursor_mode::GoOverrides {
+                            channel_owned: crate::target::cursor_mode::fishing_channel_owned(
+                                self_store,
+                                Some(guids.get(net).ok().map_or(0, |g| g.0)),
+                            ),
+                            meeting_stone_queued: crate::target::cursor_mode::meeting_stone_queued(
+                                tmpl.and_then(|t| t.meeting_stone).map(|m| m.area),
+                                go_gate.queued_area(),
+                            ),
+                        },
+                    );
+                    Some(format!(
+                        "{:.2}yd guid={} name={:?} type={} flags={:#x} dyn={:#x} eligible={}",
+                        hit.distance,
+                        guid,
+                        tmpl.map(|t| t.name.as_str()),
+                        store.0.gameobject_type_id(),
+                        store.0.gameobject_flags(),
+                        store.0.gameobject_dynamic_flags(),
+                        eligible,
+                    ))
+                })
+                .take(8)
+                .collect();
+            cache.report.say_mouse_pick(format!(
+                "ray_go_hits[nearest-first]={}",
+                if rows.is_empty() { "none".to_string() } else { rows.join(" | ") }
+            ));
+        }
 
         // Pass 2, only when nothing hit anywhere, units included (one resolve in the reference):
         // the geometry pushed 1 model unit along its normals, a halo of about a yard that makes a
@@ -781,6 +880,17 @@ impl ObjectPicker<'_, '_> {
         // hold a GameObject over a unit's halo; here the unit wins that pick.
         if best.is_none() {
             if unit_hovered.target.is_some() {
+                if mouse_debug {
+                    cache.report.say_mouse_pick(format!(
+                        "cursor=({:.0},{:.0}) exact=none inflated=skipped unit_hover={:?} occlusion={:.2}yd point={:?} ray_dir={:?} outcome=unit-hover-keeps-halo-shut",
+                        cursor.x,
+                        cursor.y,
+                        unit_hovered.target,
+                        occlusion.distance,
+                        occlusion.point,
+                        *ray.direction,
+                    ));
+                }
                 *sticky = None;
                 return nothing;
             }
@@ -824,11 +934,67 @@ impl ObjectPicker<'_, '_> {
                     best2 = Some((hit.distance, prio, part));
                 }
             }
-            best = best2.map(|(t, _, e)| (t, e));
+            inflated = best2.map(|(t, _, e)| (t, e));
+            best = inflated;
+        }
+
+        // Compare the resident GameObject geometry with the independent world trace before
+        // applying the occlusion gate. This is opt-in and say-on-change, so it remains quiet in
+        // normal play and produces useful angle-by-angle samples without a per-frame log flood.
+        let geometry_hit = best;
+        let occluded = geometry_hit.is_some_and(|(t, _)| occlusion.distance < t);
+        if mouse_debug {
+            let describe_hit = |hit: Option<(f32, Entity)>| -> String {
+                let Some((distance, part)) = hit else {
+                    return "none".to_string();
+                };
+                let net = resolve_net(part);
+                let guid = guids
+                    .get(net)
+                    .ok()
+                    .map_or_else(|| "?".to_string(), |g| format!("{:#x}", g.0));
+                let go_type = stores
+                    .get(net)
+                    .ok()
+                    .map_or_else(|| "?".to_string(), |s| s.0.gameobject_type_id().to_string());
+                let part_position = parts
+                    .get(part)
+                    .ok()
+                    .map(|(_, gt, _, _, _, _)| gt.translation());
+                format!(
+                    "{distance:.2}yd part={part:?} net={net:?} guid={guid} go_type={go_type} pos={part_position:?}"
+                )
+            };
+            let direction = *ray.direction;
+            let outcome = if occluded {
+                "blocked-by-world"
+            } else if geometry_hit.is_some() {
+                "geometry-hit"
+            } else {
+                "mesh-miss"
+            };
+            cache.report.say_mouse_pick(format!(
+                concat!(
+                    "cursor=({:.0},{:.0}) ray_dir=({:.2},{:.2},{:.2}) exact=[{}] inflated=[{}] ",
+                    "occlusion={:.2}yd point={:?} blocked={} unit_hover={:?} outcome={}"
+                ),
+                cursor.x,
+                cursor.y,
+                direction.x,
+                direction.y,
+                direction.z,
+                describe_hit(exact),
+                describe_hit(inflated),
+                occlusion.distance,
+                occlusion.point,
+                occluded,
+                unit_hovered.target,
+                outcome,
+            ));
         }
 
         // Occlusion (`0x480eb4`): a strictly nearer world hit drops the pick, a tie keeps it.
-        if best.is_some_and(|(t, _)| occlusion.distance < t) {
+        if occluded {
             best = None;
         }
         let picked = best.map(|(t, e)| (t, resolve_net(e)));
@@ -925,6 +1091,8 @@ pub(super) fn update_hovered_object(
     window: Query<&Window, With<PrimaryWindow>>,
     rig: Res<CameraControl>,
     pointer_over_ui: Res<PointerOverUi>,
+    virtual_mouse: Option<Res<crate::gamepad::GamepadVirtualMouse>>,
+    gamepad_state: Option<Res<crate::gamepad::GamepadSnapshot>>,
     occlusion: Res<PickOcclusion>,
     // The unit pick, earlier in the chain: a unit hover keeps the GameObject halo shut.
     unit_hovered: Res<Hovered>,
@@ -947,7 +1115,17 @@ pub(super) fn update_hovered_object(
     if yielded {
         return;
     }
-    let Some(cursor) = window.cursor_position().or(probe_aim) else {
+    let Some(cursor) = gamepad_state
+        .as_deref()
+        .and_then(|state| state.touch_world_pointer)
+        .or_else(|| {
+            virtual_mouse
+                .as_deref()
+                .and_then(|mouse| mouse.window_position)
+        })
+        .or_else(|| window.cursor_position())
+        .or(probe_aim)
+    else {
         return;
     };
     let Ok(ray) = cam.0.viewport_to_world(cam.1, cursor) else {

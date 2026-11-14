@@ -100,7 +100,7 @@ pub(crate) use controller::LookSample;
 pub(crate) use camera::{
     head_height, CameraControl, CameraPivot, LookConfig, LookLive, LookSteps, Looked, PressGesture,
 };
-use camera::{model_pivot_height, run_look_session, FlyCam, LookButton};
+use camera::{model_pivot_height, FlyCam, LookButton};
 use camera_zoom::{glide_zoom, CAM_DIST_DEFAULT};
 // `/follow`: chat sends the request, `crate::target` resolves the subject into the state, and
 // `follow` owns the motion.

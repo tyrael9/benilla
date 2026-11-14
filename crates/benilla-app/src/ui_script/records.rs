@@ -67,6 +67,23 @@ impl InputRecords {
     pub(crate) fn iter(&self) -> impl DoubleEndedIterator<Item = &InputRecord> {
         self.records.iter()
     }
+
+    pub(crate) fn inject_gamepad_pointer(
+        &mut self,
+        generated: Vec<InputRecord>,
+        suppress_window_pointer: bool,
+        prepend: bool,
+    ) {
+        if suppress_window_pointer {
+            self.records
+                .retain(|record| matches!(record.record, Record::Key(_)));
+        }
+        if prepend {
+            self.records.splice(0..0, generated);
+        } else {
+            self.records.extend(generated);
+        }
+    }
 }
 
 /// The eight keys the modifier mask is made of.
@@ -270,15 +287,19 @@ mod tests {
         (world, collect)
     }
 
-    fn key(code: KeyCode, state: ButtonState) -> WindowEvent {
-        WindowEvent::KeyboardInput(KeyboardInput {
+    fn key_event(code: KeyCode, state: ButtonState) -> KeyboardInput {
+        KeyboardInput {
             key_code: code,
             logical_key: Key::Unidentified(bevy::input::keyboard::NativeKey::Unidentified),
             state,
             text: None,
             repeat: false,
             window: Entity::PLACEHOLDER,
-        })
+        }
+    }
+
+    fn key(code: KeyCode, state: ButtonState) -> WindowEvent {
+        WindowEvent::KeyboardInput(key_event(code, state))
     }
 
     fn button(state: ButtonState) -> WindowEvent {
@@ -396,6 +417,88 @@ mod tests {
             .press(KeyCode::ControlLeft);
         let got = collect(&mut w, vec![key(KeyCode::Digit1, ButtonState::Pressed)]);
         assert!(got[0].mods.ctrl && got[0].mods.shift);
+    }
+
+    #[test]
+    fn gamepad_pointer_ownership_filters_os_mouse_records_but_keeps_keys() {
+        let mut records = InputRecords {
+            records: vec![
+                InputRecord {
+                    record: Record::Key(key_event(KeyCode::Digit1, ButtonState::Pressed)),
+                    mods: Default::default(),
+                    at: None,
+                },
+                InputRecord {
+                    record: Record::Move,
+                    mods: Default::default(),
+                    at: Some(Vec2::ONE),
+                },
+                InputRecord {
+                    record: Record::Button {
+                        button: MouseButton::Left,
+                        state: ButtonState::Pressed,
+                    },
+                    mods: Default::default(),
+                    at: Some(Vec2::ONE),
+                },
+            ],
+            ..Default::default()
+        };
+
+        records.inject_gamepad_pointer(
+            vec![InputRecord {
+                record: Record::Move,
+                mods: Default::default(),
+                at: Some(Vec2::splat(2.0)),
+            }],
+            true,
+            false,
+        );
+
+        assert_eq!(records.records.len(), 2);
+        assert!(matches!(records.records[0].record, Record::Key(_)));
+        assert!(matches!(records.records[1].record, Record::Move));
+        assert_eq!(records.records[1].at, Some(Vec2::splat(2.0)));
+    }
+    #[test]
+    fn gamepad_pointer_releases_are_prepended_before_window_events() {
+        let mut records = InputRecords::default();
+        records.records.push(InputRecord {
+            record: Record::Button {
+                button: MouseButton::Left,
+                state: ButtonState::Pressed,
+            },
+            mods: Default::default(),
+            at: Some(Vec2::ONE),
+        });
+
+        records.inject_gamepad_pointer(
+            vec![InputRecord {
+                record: Record::Button {
+                    button: MouseButton::Left,
+                    state: ButtonState::Released,
+                },
+                mods: Default::default(),
+                at: Some(Vec2::splat(2.0)),
+            }],
+            false,
+            true,
+        );
+
+        assert!(matches!(
+            records.records[0].record,
+            Record::Button {
+                state: ButtonState::Released,
+                ..
+            }
+        ));
+        assert!(matches!(
+            records.records[1].record,
+            Record::Button {
+                state: ButtonState::Pressed,
+                ..
+            }
+        ));
     }
 
     /// A wheel turn is a record at its place among the others (kind 0xb), at the cursor of its

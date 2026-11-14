@@ -57,6 +57,7 @@ fn pet_unit() -> UnitState {
 fn hunter_pet_stats() -> PetStats {
     PetStats {
         icon: None,
+        family: Some("Boar".into()),
         hunter_pet: true,
         happiness: Some(3),
         damage_percentage: 125.0,

@@ -276,9 +276,9 @@ impl Default for UiScaleCvar {
 /// off, its default (`0x8430c0`), the reference sets `max(768/H, 0.9)` above 768 px tall and 1.0
 /// at or below (`0x492f70`, on a mode set and from `0x4908ad`), so the two agree from ~853 px up.
 /// benilla never reads `useUiScale`: this CVar always applies to `UIParent` alone, as with it on.
-/// A change goes through the CVar callback (`0x490770`: the narrow-aspect cap, the 0.64 floor);
-/// the load and a display change through the display handler's ON leg (`0x492e90`: the cap, and
-/// below 0.64 the automatic scale `0x492f70` instead of the floor).
+/// A manual change reaches `UIParent` with only the 0.64 floor; this fork deliberately skips the
+/// narrow-aspect cap so half-screen windows remain readable. The load and a display change still
+/// use the automatic scale `0x492f70` below 0.64, retaining its narrow-aspect behavior.
 pub(crate) const DEFAULT_UI_SCALE: f32 = 0.9;
 
 /// The display the reference's automatic UI scale last ran for (`0x492f70`'s `[0xb4e304]` and

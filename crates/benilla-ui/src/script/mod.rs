@@ -81,6 +81,7 @@ mod follow;
 pub(crate) mod font;
 mod font_block;
 mod frame_enum;
+mod gamepad;
 pub mod origin;
 mod roster_read;
 pub use char_name::{check_char_name, NameCharsets, NameLists, NoNameLists, CHAR_NAME_SUCCESS};
@@ -422,8 +423,8 @@ pub use minimap::{
 };
 pub(crate) use model::Model;
 pub use model::{
-    FontProbe, MacroIconSource, TextureProbe, TextureSizeFn, TextureSizeProbe, WorldLocFn,
-    WorldLocProjector,
+    FontProbe, GamepadLuaState, MacroIconSource, TextureProbe, TextureSizeFn, TextureSizeProbe,
+    WorldLocFn, WorldLocProjector,
 };
 pub use mouseover::FreelookQuery;
 pub use party::{
@@ -795,6 +796,7 @@ fn install_in_game(lua: &Lua) -> mlua::Result<()> {
     follow::install(lua)?;
     camera_view::install(lua)?;
     input_verbs::install(lua)?;
+    gamepad::install(lua)?;
     session::install(lua)?;
     pvp::install(lua)?;
     worn_display::install(lua)?;
@@ -1103,6 +1105,70 @@ impl UiScript {
     pub fn set_modifiers(&mut self, shift: bool, ctrl: bool, alt: bool) {
         let mut model = self.model_mut();
         model.modifiers = (shift, ctrl, alt);
+    }
+
+    /// Publish the latest platform controller snapshot for FrameXML and addon Lua calls.
+    pub fn set_gamepad_state(&mut self, state: GamepadLuaState) {
+        self.model_mut().gamepad = state;
+    }
+
+    /// The mobile movement-stick settings used by the engine's touch recognizer. This is a direct
+    /// model read, not a Lua evaluation, so the per-frame touch path does not run FrameScript code.
+    pub fn touch_stick_settings(&self) -> (f32, f32, f32, f32, bool, bool) {
+        let model = self.model_ref();
+        (
+            model.touch_stick_center_x,
+            model.touch_stick_center_y,
+            model.touch_stick_radius,
+            model.touch_stick_travel,
+            model.touch_stick_enabled,
+            model.touch_stick_unlocked,
+        )
+    }
+
+    /// Run one nearest-target cycle from an engine-owned input such as the controller's R3 press.
+    /// The caller must lend the script-call host (for example through `VmWith::run`).
+    pub fn target_nearest(&self, mode: NearestMode, reverse: bool) -> mlua::Result<()> {
+        self.target_nearest_with_options(mode, reverse, None, false)
+    }
+
+    /// Run a nearest-target cycle with the user's live CVar range, restricted to the camera view.
+    /// Controller R3 uses this so off-screen and behind-camera candidates cannot be selected.
+    pub fn target_nearest_in_view(
+        &self,
+        mode: NearestMode,
+        reverse: bool,
+    ) -> mlua::Result<()> {
+        self.target_nearest_with_options(mode, reverse, None, true)
+    }
+
+    /// Run a nearest-target cycle with an optional engine-owned range override.
+    pub fn target_nearest_with_range(
+        &self,
+        mode: NearestMode,
+        reverse: bool,
+        range_override: Option<f32>,
+    ) -> mlua::Result<()> {
+        self.target_nearest_with_options(mode, reverse, range_override, false)
+    }
+
+    fn target_nearest_with_options(
+        &self,
+        mode: NearestMode,
+        reverse: bool,
+        range_override: Option<f32>,
+        require_in_view: bool,
+    ) -> mlua::Result<()> {
+        calls::submit(
+            &self.lua,
+            ScriptCall::TargetNearest {
+                mode,
+                reverse,
+                range_override,
+                require_in_view,
+                may_cast: true,
+            },
+        )
     }
 
     /// Push the player's WMO-containment state, the indoor byte `0xceaa60` that picks which zoom
@@ -1604,6 +1670,12 @@ impl UiScript {
         model
             .focused_editbox
             .is_some_and(|h| model.arena.frame(h).is_some_and(|f| f.effective_visible))
+    }
+
+    /// Clear the current EditBox focus and fire its `OnEditFocusLost`, without changing its text.
+    /// Used by touch hosts to dismiss the software keyboard when a tap lands outside an EditBox.
+    pub fn clear_keyboard_focus(&self) -> bool {
+        editbox::clear_focused(&self.lua)
     }
 
     /// The focused EditBox's name, unfiltered by visibility, unlike [`Self::has_keyboard_focus`].

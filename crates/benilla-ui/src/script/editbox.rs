@@ -283,6 +283,19 @@ pub(super) fn visibility_focus(lua: &Lua, h: FrameHandle, visible: bool) {
     }
 }
 
+/// Clear whichever EditBox currently owns the keyboard, using the stock ClearFocus path.
+pub(super) fn clear_focused(lua: &Lua) -> bool {
+    let focused = lua
+        .app_data_ref::<Model>()
+        .expect("model app_data")
+        .focused_editbox;
+    let Some(h) = focused else {
+        return false;
+    };
+    clear_focus_handle(lua, h);
+    true
+}
+
 /// `ClearFocus` (`0x77e410`): only when this box holds the focus (`[0xcf4dc8]`), then fires
 /// `OnEditFocusLost`.
 fn clear_focus_handle(lua: &Lua, h: FrameHandle) {

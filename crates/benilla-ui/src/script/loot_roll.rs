@@ -71,6 +71,12 @@ fn entry(lua: &Lua, roll_id: u32) -> Option<LootRollEntry> {
     })
 }
 
+/// The item-bearing roll source for `GameTooltip:SetLootRollItem`, using the same live read as
+/// the getters and rejecting the empty rows that cannot build an item tooltip.
+pub(super) fn tooltip_entry(lua: &Lua, roll_id: u32) -> Option<LootRollEntry> {
+    entry(lua, roll_id).filter(|r| r.item_id != 0)
+}
+
 /// The VM's own copy of the listed rolls, oldest first, which the getters read only with no host.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LootRollsState {
@@ -254,8 +260,24 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{LootRollEntry, LootRollsState};
-    use crate::script::UiScript;
+    use super::{tooltip_entry, LootRollEntry, LootRollQuery, LootRollsState};
+    use crate::script::{CallHost, CallTail, ScriptCall, UiScript};
+
+    /// A host that answers loot-roll reads without populating the VM's local snapshot.
+    struct LiveRollHost(LootRollEntry);
+
+    impl CallHost for LiveRollHost {
+        fn apply(&mut self, _: &mut UiScript, _: ScriptCall) -> Option<CallTail> {
+            None
+        }
+
+        fn read_live(&mut self, ask: &mut crate::script::live::LiveAsk<'_>) -> bool {
+            let roll = self.0.clone();
+            ask.answer(|query: &LootRollQuery| {
+                (query.roll_id == roll.roll_id).then_some(roll)
+            })
+        }
+    }
 
     fn rolls() -> LootRollsState {
         LootRollsState {
@@ -288,6 +310,20 @@ mod tests {
                 },
             ],
         }
+    }
+
+    #[test]
+    fn tooltip_entry_reads_the_live_host_when_the_vm_snapshot_is_empty() {
+        let mut s = UiScript::new().unwrap();
+        let lua = s.lua().clone();
+        let expected = rolls().rolls[0].clone();
+        let mut host = LiveRollHost(expected.clone());
+
+        s.hosted(&mut host, |_| {
+            let actual = tooltip_entry(&lua, expected.roll_id)
+                .expect("the host's active roll should be visible to the tooltip");
+            assert_eq!(actual, expected);
+        });
     }
 
     #[test]

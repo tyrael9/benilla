@@ -348,6 +348,65 @@ fn minimap_interior<'a>(
     })
 }
 
+/// Resolve the same pointer position used by the UI hover walk for minimap blip hit-tests.
+fn blip_cursor_window_position(
+    window_cursor: Option<Vec2>,
+    touch_ui_pointer: Option<Vec2>,
+    virtual_mouse: Option<&crate::gamepad::GamepadVirtualMouse>,
+) -> Option<Vec2> {
+    touch_ui_pointer
+        .or_else(|| {
+            virtual_mouse
+                .filter(|mouse| mouse.active)
+                .and_then(|mouse| mouse.window_position)
+        })
+        .or(window_cursor)
+}
+
+#[cfg(test)]
+mod blip_cursor_tests {
+    use super::*;
+
+    #[test]
+    fn active_lt_pointer_wins_over_the_physical_cursor_for_blip_hits() {
+        let physical = Vec2::new(12.0, 24.0);
+        let virtual_at = Vec2::new(300.0, 420.0);
+        let mut mouse = crate::gamepad::GamepadVirtualMouse::default();
+        mouse.active = true;
+        mouse.window_position = Some(virtual_at);
+
+        assert_eq!(
+            blip_cursor_window_position(Some(physical), None, Some(&mouse)),
+            Some(virtual_at)
+        );
+    }
+
+    #[test]
+    fn inactive_lt_pointer_falls_back_to_the_physical_cursor() {
+        let physical = Vec2::new(12.0, 24.0);
+        let mut mouse = crate::gamepad::GamepadVirtualMouse::default();
+        mouse.window_position = Some(Vec2::new(300.0, 420.0));
+
+        assert_eq!(
+            blip_cursor_window_position(Some(physical), None, Some(&mouse)),
+            Some(physical)
+        );
+    }
+
+    #[test]
+    fn touch_pointer_keeps_the_ui_hover_walks_priority() {
+        let touch = Vec2::new(80.0, 90.0);
+        let mut mouse = crate::gamepad::GamepadVirtualMouse::default();
+        mouse.active = true;
+        mouse.window_position = Some(Vec2::new(300.0, 420.0));
+
+        assert_eq!(
+            blip_cursor_window_position(Some(Vec2::ZERO), Some(touch), Some(&mouse)),
+            Some(touch)
+        );
+    }
+}
+
 /// Fill the widget hole: the tiles masked to the circle, then the landmark icons and the dots, at
 /// the widget's z (a stable sort keeps append order, so all sit below the widget's children).
 fn emit_minimap(
@@ -382,6 +441,8 @@ fn emit_minimap(
         locks,
         poi_marker,
         pois,
+        gamepad_state,
+        gamepad_mouse,
     ) = blip_inputs;
     // Hover resets every frame; the blip pass re-establishes it while the map draws.
     *blip_hover = blips::MinimapBlipHover::default();
@@ -645,10 +706,19 @@ fn emit_minimap(
                 tracking.stealthed,
             );
         }
-        // The cursor on the interface's screen, where the slot's rect is.
+        // Use the same owner and coordinate source as ui_script::feed_ui_input. That walk
+        // already probes the Minimap with the LT pointer; blip hit-testing must not fall back to
+        // the OS cursor or the tooltip will be tested at a different point.
         let cursor = window.iter().next().and_then(|w| {
             let screen = crate::ui_script::UiScreen::of_window(w, widescreen.as_deref());
-            w.cursor_position().map(|c| screen.point(c))
+            blip_cursor_window_position(
+                w.cursor_position(),
+                gamepad_state
+                    .as_deref()
+                    .and_then(|state| state.touch_ui_pointer),
+                gamepad_mouse.as_deref(),
+            )
+            .map(|c| screen.point(c))
         });
         // The pan origin snapped to a half-logical-pixel grid: every blip offset and rim bearing
         // derives from `wx`/`wy`, so the layer steps together instead of rewriting the batch mesh

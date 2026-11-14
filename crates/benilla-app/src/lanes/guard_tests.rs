@@ -343,6 +343,9 @@ pub(super) const HOST_HELD_UNREAD: &[&str] = &[
 /// a row whose feed or inputs moved fails until it matches.
 #[rustfmt::skip]
 pub(super) const READS_FRAME_FINAL: &[(&str, &[&str])] = &[
+    // R3 chooses Smart versus hostile targeting from the player's combat flags after this
+    // frame's packet handlers have updated the self player's ObjectStore.
+    ("::gamepad::gamepad_r3_target_nearest", &["net::ObjectStore"]),
 ];
 
 /// The view pushes [`READS_FRAME_FINAL`]'s test finds whose build the reference too makes outside

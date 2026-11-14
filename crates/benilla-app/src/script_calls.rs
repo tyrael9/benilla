@@ -1221,8 +1221,19 @@ impl CallHost for ScriptCallHost<'_, '_> {
             ScriptCall::TargetByName { name, exact, .. } => {
                 owed = appliers.select().target_by_name(&name, exact);
             }
-            ScriptCall::TargetNearest { mode, reverse, .. } => {
-                owed = appliers.select().target_nearest(mode, reverse);
+            ScriptCall::TargetNearest {
+                mode,
+                reverse,
+                range_override,
+                require_in_view,
+                ..
+            } => {
+                owed = appliers.select().target_nearest_with_options(
+                    mode,
+                    reverse,
+                    range_override,
+                    require_in_view,
+                );
             }
             ScriptCall::TargetLastTarget { .. } => owed = appliers.select().target_last_target(),
             ScriptCall::ClearTarget => owed = appliers.select().clear_target(),

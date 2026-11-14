@@ -3,3 +3,8 @@
 # `release`). Env vars still prefix it: `WOW_USER=<account> WOW_PASS=<password> cargo play`.
 [alias]
 play = "run --profile play -p benilla"
+
+# SDL3's crates.io source bundle omits its test/examples subprojects. Keep the
+# CMake source build focused on the runtime library used only for controller IO.
+[env]
+CMAKE_TOOLCHAIN_FILE = { value = ".cargo/sdl3-gamepad.cmake", relative = true }

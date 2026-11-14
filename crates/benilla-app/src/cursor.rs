@@ -201,6 +201,16 @@ impl PointerDevice {
     pub(crate) fn hides(&self, look_released: bool) -> bool {
         !self.shown && !(self.by_look && look_released)
     }
+
+    /// Whether the native pointer must be hidden because either the game owns it or the
+    /// per-window LT virtual pointer is currently the visible pointer.
+    pub(crate) fn hides_with_virtual_mouse(
+        &self,
+        look_released: bool,
+        virtual_mouse_active: bool,
+    ) -> bool {
+        virtual_mouse_active || self.hides(look_released)
+    }
 }
 
 /// Run the device's calls from the look, the cinematic and the glue VM.
@@ -262,6 +272,105 @@ fn decode_custom_cursor_rgba(
 /// [`crate::target::WorldCursor`] is one of its two writers.
 #[derive(Resource, Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub(crate) struct DisplayedCursor(pub(crate) crate::target::WorldCursor);
+
+/// Cursor images used by the per-instance gamepad cursor overlay. This is deliberately separate
+/// from the native OS cursor: each Benilla window renders its own cursor in its own UI quad pass.
+#[derive(Resource, Default)]
+struct VirtualCursorTextures {
+    textures: std::collections::HashMap<String, Handle<Image>>,
+}
+
+fn virtual_cursor_texture(
+    stem: &str,
+    textures: &mut VirtualCursorTextures,
+    world_assets: &mut benilla_assets::WorldAssets,
+    images: &mut Assets<Image>,
+) -> Option<Handle<Image>> {
+    if let Some(texture) = textures.textures.get(stem) {
+        return Some(texture.clone());
+    }
+
+    let path = cursor_path(stem);
+    if let Some(texture) = world_assets.sprite_texture(&path, images) {
+        textures.textures.insert(stem.to_string(), texture.clone());
+        return Some(texture);
+    }
+
+    // A grey/unavailable mode may not have an authored BLP. Use its normal counterpart.
+    if let Some(base) = stem.strip_prefix("Unable") {
+        if let Some(texture) = textures.textures.get(base) {
+            return Some(texture.clone());
+        }
+        let path = cursor_path(base);
+        if let Some(texture) = world_assets.sprite_texture(&path, images) {
+            textures.textures.insert(base.to_string(), texture.clone());
+            return Some(texture);
+        }
+    }
+
+    textures.textures.get("Point").cloned()
+}
+
+/// Draw the active LT pointer into this Benilla instance's own UI overlay lane. It never reads or
+/// moves the OS cursor, so two windows can each own an independent gamepad and pointer.
+fn update_virtual_cursor_overlay(
+    mouse: Res<crate::gamepad::GamepadVirtualMouse>,
+    displayed: Res<DisplayedCursor>,
+    mut quads: ResMut<crate::ui_pass::UiQuads>,
+    window: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    mut textures: ResMut<VirtualCursorTextures>,
+    world_assets: Option<ResMut<benilla_assets::WorldAssets>>,
+    mut images: ResMut<Assets<Image>>,
+    script: Option<NonSend<benilla_ui::script::UiScript>>,
+    screen: Res<crate::loading_screen::LoadingScreen>,
+) {
+    if !mouse.active {
+        return;
+    }
+    let Ok(window) = window.single() else {
+        return;
+    };
+    let Some(mut assets) = world_assets else {
+        return;
+    };
+
+    // A dragged item/spell/action uses the payload icon; otherwise follow the world's or
+    // FrameXML's current cursor mode (Point, Attack, Cast, Buy, ...).
+    let texture = if let Some(icon) = script
+        .as_deref()
+        .and_then(|script| payload_icon(script, screen.covering()))
+    {
+        let key = format!("payload:{icon}");
+        if let Some(handle) = textures.textures.get(&key).cloned() {
+            Some(handle)
+        } else {
+            assets
+                .sprite_texture(&icon, &mut images)
+                .inspect(|handle| {
+                    textures.textures.insert(key, handle.clone());
+                })
+        }
+    } else {
+        virtual_cursor_texture(
+            &displayed.0.stem(),
+            &mut textures,
+            &mut *assets,
+            &mut images,
+        )
+    };
+
+    let Some(texture) = texture else {
+        return;
+    };
+    let scale = crate::ui_script::seam_scale(window.height());
+    let pos = Vec2::new(
+        mouse.position_ui.x * scale,
+        window.height() - mouse.position_ui.y * scale,
+    );
+    quads
+        .overlays
+        .push(crate::ui_script::extract::cursor_icon_quad(pos, texture));
+}
 
 /// Resolve this frame's displayed cursor: one sticky mode with two writers, the world (the
 /// WorldFrame's hover handler `0x481790`, only while it holds mouse focus) and FrameXML
@@ -408,7 +517,15 @@ impl Plugin for CursorPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<DisplayedCursor>()
             .init_resource::<CustomCursorName>()
-            .init_resource::<PointerDevice>();
+            .init_resource::<PointerDevice>()
+            .init_resource::<VirtualCursorTextures>()
+            .add_systems(
+                Update,
+                update_virtual_cursor_overlay
+                    .in_set(crate::ui_pass::UiQuadAppend)
+                    .after(crate::ui_script::UiInput)
+                    .after(drive_displayed_cursor),
+            );
         #[cfg(target_os = "macos")]
         app.add_systems(Startup, macos::setup.after(AssetSet::Open))
             .add_systems(
@@ -591,10 +708,14 @@ mod other {
     pub(super) fn drive_pointer(
         device: Res<super::PointerDevice>,
         rig: Option<Res<crate::player::CameraControl>>,
+        mouse: Option<Res<crate::gamepad::GamepadVirtualMouse>>,
         mut cursor: Query<&mut bevy::window::CursorOptions, With<PrimaryWindow>>,
         mut ours: Local<bool>,
     ) {
-        let hidden = device.hides(super::look_released(rig.as_deref()));
+        let hidden = device.hides_with_virtual_mouse(
+            super::look_released(rig.as_deref()),
+            mouse.as_deref().is_some_and(|mouse| mouse.active),
+        );
         if let Ok(mut opts) = cursor.single_mut() {
             if let Some(visible) = super::pointer_visibility(hidden, &mut ours, opts.visible) {
                 opts.visible = visible;
@@ -670,8 +791,8 @@ mod macos {
         world.insert_non_send_resource(NativeCursors(cursors));
     }
 
-    /// Disable the window's cursor rects once, set the payload or mode cursor while not looking,
-    /// and hide or unhide it across mouselook.
+    /// Disable the window's cursor rects once, set the payload or mode cursor while the native
+    /// pointer is visible, and hide it while mouselook or the LT overlay owns the pointer.
     pub(super) fn drive(
         cursors: Option<NonSend<NativeCursors>>,
         mut payload_cursors: NonSendMut<PayloadCursors>,
@@ -682,10 +803,11 @@ mod macos {
         screen: Res<crate::loading_screen::LoadingScreen>,
         rig: Res<CameraControl>,
         device: Res<super::PointerDevice>,
+        mouse: Option<Res<crate::gamepad::GamepadVirtualMouse>>,
         mut focus: MessageReader<bevy::window::WindowFocused>,
         // The `Local`s below remember OS state, which outlives the VM, so none is a
         // [`crate::ui_script::VmMemo`].
-        mut was_looking: Local<bool>,
+        mut state: Local<(Option<bool>, bool)>,
         mut rects_disabled: Local<bool>,
         mut decode_failed: Local<HashSet<String>>,
         mut last_set: Local<Option<String>>,
@@ -697,6 +819,7 @@ mod macos {
         };
         // macOS resets the cursor to the arrow on every activation: re-assert on focus gain.
         for ev in focus.read() {
+            state.0 = Some(ev.focused);
             if ev.focused {
                 *last_set = None;
             }
@@ -723,7 +846,14 @@ mod macos {
         }
         // The device's one flag decides (`0x595c20`). `CursorOptions.visible` is inert here, so
         // AppKit's hide and unhide run on its edges only, which keeps the counter balanced.
-        let looking = device.hides(super::look_released(Some(&*rig)));
+        // NSCursor::hide is app-global on macOS. LT may stay held through an app switch, but
+        // the other app must regain its system pointer until this window is focused again.
+        let virtual_mouse_active = mouse.as_deref().is_some_and(|mouse| mouse.active)
+            && state.0.unwrap_or(true);
+        let hidden = device.hides_with_virtual_mouse(
+            super::look_released(Some(&*rig)),
+            virtual_mouse_active,
+        );
         let stem = mode.0.stem();
         // Mode 41 shows the picture `SetCursor` loaded, built from its path on first use.
         let custom_key = (mode.0.kind == crate::target::CursorKind::Custom)
@@ -782,14 +912,14 @@ mod macos {
                     }
                 }
             }
-            if looking && !*was_looking {
+            if hidden && !state.1 {
                 NSCursor::hide();
                 // The next un-look re-asserts even an unchanged cursor.
                 *last_set = None;
-            } else if !looking && *was_looking {
+            } else if !hidden && state.1 {
                 NSCursor::unhide();
             }
-            if !looking {
+            if !hidden {
                 // Assert on a key change or on drift: winit's view and AppKit's activation resets
                 // set the arrow at any moment, and a held payload's key never changes during a
                 // carry. `currentCursor` is an app-local read, free every frame.
@@ -812,7 +942,7 @@ mod macos {
                 }
             }
         }
-        *was_looking = looking;
+        state.1 = hidden;
     }
 
     /// RGBA → `NSCursor`, via PNG and `NSImage::initWithData`.
@@ -1046,6 +1176,26 @@ mod tests {
         assert_eq!(pointer_visibility(true, &mut ours, false), None);
         assert!(!ours);
         assert_eq!(pointer_visibility(false, &mut ours, false), None);
+    }
+
+    #[test]
+    fn the_lt_virtual_mouse_hides_the_native_pointer() {
+        let device = PointerDevice::default();
+        assert!(
+            device.hides_with_virtual_mouse(false, true),
+            "the native pointer gives way to the LT overlay"
+        );
+        assert!(
+            !device.hides_with_virtual_mouse(false, false),
+            "the native pointer returns when LT no longer owns it"
+        );
+        let mut game_hidden = PointerDevice::default();
+        game_hidden.queue(false);
+        game_hidden.advance(false, false);
+        assert!(
+            game_hidden.hides_with_virtual_mouse(false, false),
+            "ordinary HideCursor ownership still applies"
+        );
     }
 
     /// The reference parks cursor index 1 before the loading screen goes up (`0x6e49f5`).

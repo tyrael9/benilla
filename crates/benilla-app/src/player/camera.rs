@@ -1319,25 +1319,22 @@ pub(crate) struct CameraPivot {
 /// Returns whether a mouse motion reached the body's hand-off this frame: the motion handler
 /// `0x514400` hands the camera's facing and pitch on (`0x5103e0`) for each motion while the mouse
 /// turns the body (`0x51446f`), before the body gates of `0x5145e0`, which are the caller's.
-pub(super) fn run_look_session(
+pub(super) fn run_look_session_with_gamepad(
     mouse_motion: &AccumulatedMouseMotion,
+    gamepad_look: Vec2,
+    touch_look_delta: Vec2,
+    touch_look_active: bool,
     rig: &mut CameraControl,
     cam: &mut FlyCam,
     face_yaw: &mut f32,
     window: &mut Window,
     cursor_opts: &mut CursorOptions,
     inspect_enabled: bool,
-    // The click the mouse commands armed, whose travel the motion adds to (`0x514400`).
     arm: &mut crate::target::ClickArm,
     look_cfg: LookConfig,
-    // `cameraPivot`'s routing lives here because the reference's does: `0x50fee0`, the mouse-motion
-    // handler, sends each motion event to the pitch or the bias.
     dynamics: &DynamicsInput,
-    // The primary window has the OS focus.
     focused: bool,
-    // The primary bits off their store, which hold the session's channel and raise its entry.
     primaries: Primaries,
-    // `[InputControl+4]` holds a bit ([`super::input::word_held`]).
     word_held: bool,
 ) -> bool {
     let holds = |b: LookButton| primaries.held[b as usize];
@@ -1350,21 +1347,27 @@ pub(super) fn run_look_session(
             window.set_cursor_position(Some(pos));
         }
     }
-    let motion = if sync_look_focus(rig, focused, window, cursor_opts) {
+    let mouse_delta = if sync_look_focus(rig, focused, window, cursor_opts) {
         mouse_motion.delta
     } else {
         Vec2::ZERO
     };
-    // The motion handler returns on an empty command word (`0x51440c`), ahead of the click's
-    // travel, the camera's turn (`0x514446`, the one caller of `0x50fee0`) and the hand-off: a
-    // `ToggleMouseMove` with nothing held hides the cursor, and the mouse turns nothing.
-    let motion = if word_held { motion } else { Vec2::ZERO };
+    // Mouse motion belongs to a held command word; the right stick remains an independent camera
+    // input and does not arm or spend a world-click gesture.
+    let mouse_delta = if word_held { mouse_delta } else { Vec2::ZERO };
+    const GAMEPAD_LOOK_SPEED: f32 = 6.0;
+    let touch_delta = if touch_look_active {
+        touch_look_delta
+    } else {
+        Vec2::ZERO
+    };
+    let motion = mouse_delta + touch_delta + gamepad_look * GAMEPAD_LOOK_SPEED;
     let (toggles, release_sticky, owed) = rig.world_mouse.take_session_edges();
     // The armed click accumulates the rotation the press asked for, charged before the pitch
     // clamp: the reference accumulates raw motion, so a drag pinned at the pitch limit still spends
     // budget.
     let (yaw_rate, pitch_rate) = (look_cfg.yaw_rate(), look_cfg.pitch_rate());
-    let (yaw, pitch) = look_cfg.click_travel(motion);
+    let (yaw, pitch) = look_cfg.click_travel(mouse_delta);
     arm.add_travel(yaw, pitch);
 
     // `ToggleMouseMove` (`0x50f910`), each call against the camera's mouselook bit as it stands:
@@ -1439,7 +1442,7 @@ pub(super) fn run_look_session(
 
     // Look rotation; a right-drag also turns the character.
     let mut handed = false;
-    if rig.look.is_some() {
+    if rig.look.is_some() || gamepad_look != Vec2::ZERO || touch_look_active {
         let delta = motion;
         // A mouse turn sets mode bit 6 (`0x50fee9`).
         rig.view_moved |= delta != Vec2::ZERO;

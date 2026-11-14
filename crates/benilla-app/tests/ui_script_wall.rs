@@ -45,7 +45,9 @@ fn family(rel: &str) -> Family {
 /// show a refused follow's line in the calling VM and post its events at their signal points.
 /// 43: the host's world click (`script_calls/world_click.rs`), which applies the mouse commands'
 /// click inside their calls and keeps the steps that wait for an arm's pick in the calling VM.
-const CEILING: usize = 43;
+/// 44: the gamepad bridge (`gamepad.rs`), which reads the UI hit-test for touch routing and
+/// publishes the platform's controller snapshot to the FrameXML VM once per feed phase.
+const CEILING: usize = 44;
 
 /// How far under [`CEILING`] the count may sit before the test asks for the ceiling to follow it.
 const SLACK: usize = 4;

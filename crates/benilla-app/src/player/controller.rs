@@ -4,6 +4,7 @@
 //! posture commit before the pose, the ack after the launch).
 
 use super::*;
+use crate::player::state::MOUSELOOK_PITCH_CLAMP;
 
 #[cfg(test)]
 mod tests;
@@ -127,6 +128,7 @@ pub(super) fn sample_look(
         Res<camera_dynamics::CameraOptions>,
         // Only `nearclip` is read here, for the dynamics.
         Res<benilla_world::view::ViewDistance>,
+        Res<crate::gamepad::GamepadSnapshot>,
     ),
     gates: (
         Res<InspectMode>,
@@ -199,8 +201,11 @@ pub(super) fn sample_look(
     }
     let focused = window.focused;
     let word_held = input::word_held(follow_command, &player);
-    let looked = run_look_session(
+    let looked = camera::run_look_session_with_gamepad(
         &pointer.0,
+        pointer.5.look_axis(),
+        pointer.5.touch_look_delta,
+        pointer.5.touch_look_active,
         &mut rig,
         &mut cam,
         &mut player.face_yaw,
@@ -310,6 +315,11 @@ pub(super) fn control(
         Res<view_subject::FarSight>,
         // The pitch latch the calls left, which the frame's writes of the latch supersede.
         Option<ResMut<super::press::CallPitch>>,
+        // Platform input and the physical legacy SITORSTAND binding hold.
+        (
+            Res<crate::gamepad::GamepadSnapshot>,
+            Res<crate::bindings::BindingLatches>,
+        ),
     ),
     mut commands: Commands,
     mut player: ResMut<Player>,
@@ -359,6 +369,8 @@ pub(super) fn control(
         &speed_capsule.3,
     );
     let binds = &speed_capsule.4;
+    let gamepad = &speed_capsule.14.0;
+    let binding_latches = &speed_capsule.14.1;
     let view_subject = &speed_capsule.5;
     let self_guid = speed_capsule.6 .0;
     let scoped = &speed_capsule.7;
@@ -478,6 +490,38 @@ pub(super) fn control(
     );
     glide_zoom(dt, &mut rig, zoom_max, pointer.2.move_speed);
     camera_view::step_pitch(&mut rig, &mut cam, dt);
+
+    // Preserve the original controller swim-pitch path. The split LookSample hand-off below only
+    // reports mouse/button motion; a right-stick-only look never sets hands_off, so without this
+    // explicit path the swimmer keeps a level mover pitch and cannot dive.
+    let gamepad_look = gamepad.look_axis();
+    let gamepad_owns_swim_pitch = player.swimming && gamepad.current.zl <= 0.5;
+    if gamepad_owns_swim_pitch {
+        let near_surface = match player.liquid_surface {
+            Some(surface_y) => {
+                let depth = surface_y - player.pos.y;
+                depth <= swim::swim_enter_depth(player.collision_height.0) + 0.5
+            }
+            None => false,
+        };
+
+        if near_surface {
+            // At the surface ignore the camera's ordinary downward bias unless the vertical
+            // stick is deliberately pushed; this prevents accidental dives while merely looking.
+            if gamepad_look.y.abs() > 0.5 {
+                let aim_pitch = cam.pitch + rig.smart_pivot.bias();
+                player.mover_pitch =
+                    aim_pitch.clamp(-MOUSELOOK_PITCH_CLAMP, MOUSELOOK_PITCH_CLAMP);
+            } else {
+                player.mover_pitch = 0.0;
+            }
+        } else if gamepad_look.y.abs() > 0.05 {
+            // Underwater the full stick range controls the swim mover pitch responsively.
+            let aim_pitch = cam.pitch + rig.smart_pivot.bias();
+            player.mover_pitch =
+                aim_pitch.clamp(-MOUSELOOK_PITCH_CLAMP, MOUSELOOK_PITCH_CLAMP);
+        }
+    }
 
     // Free fly is a dev tool on the dev chord: a bare `F` is the player's to bind.
     if crate::run_mode::dev_chord(&keys, KeyCode::KeyF) {
@@ -610,10 +654,19 @@ pub(super) fn control(
                 info!("mouse: unmapped button Other({n}) — bindings know BUTTON4/BUTTON5 as winit Forward/Back");
             }
         }
-        let axes = input::move_axes(binds, &mut player, both_buttons, may_translate, may_turn);
+        let axes = input::move_axes(
+            binds,
+            &mut player,
+            gamepad.move_axis(),
+            cam.yaw,
+            both_buttons,
+            may_translate,
+            may_turn,
+        );
         let input::MoveAxes {
             fwd: fwd_axis,
             side: side_axis,
+            analog,
             mouselook,
             turning,
             translating,
@@ -621,7 +674,7 @@ pub(super) fn control(
             turn_right,
             ..
         } = axes;
-        if fwd_axis != 0 || side_axis != 0 {
+        if fwd_axis != 0 || side_axis != 0 || analog != Vec2::ZERO {
             net.12.moved();
         }
         if mouselook {
@@ -675,6 +728,9 @@ pub(super) fn control(
             -1 => dir -= move_right,
             _ => {}
         }
+        if analog != Vec2::ZERO {
+            dir = dir.normalize_or_zero();
+        }
         // Translation dies here, but a root leaves turning live: the reference's allow-list permits
         // the turn, pitch, run/walk and SetFacing commands (`0x615c71`, `0x618054`). A stun, which
         // vmangos applies with a root (`SpellAuras.cpp:3502`), or death stops the turn as well.
@@ -726,7 +782,7 @@ pub(super) fn control(
         // `GetCurrentSpeed` (`0x7c4c90`), shared with the remote extrapolator: the walk arm comes
         // before the backward min, so walking backwards is walk speed. It takes this frame's gait
         // intent, since the wire word is built after the mover.
-        let speed = crate::net::current_speed(
+        let mut speed = crate::net::current_speed(
             &speeds,
             if net_backward {
                 move_flags::BACKWARD
@@ -738,6 +794,9 @@ pub(super) fn control(
                 0
             },
         );
+        if analog != Vec2::ZERO {
+            speed *= analog.length();
+        }
         // `Jump` (`0x513bd0`) inlines `0x5144e0` and `0x514560`, which is `may_translate` term for
         // term: health, root and stand state 7. Hover's refusal is the movement handler's
         // (`0x7c623a`), which keeps the mounted flourish reachable while hovering.
@@ -809,7 +868,8 @@ pub(super) fn control(
         let pitch_integrating = if swimming {
             swim_fwd != 0.0 || swim_side != 0.0
         } else {
-            (may_translate && (fwd_axis != 0 || side_axis != 0)) || player.airborne_since.is_some()
+            (may_translate && (fwd_axis != 0 || side_axis != 0 || analog != Vec2::ZERO))
+                || player.airborne_since.is_some()
         };
         swim::integrate_pitch_keys(&mut player, turn_rate, pitch_integrating, dt);
 
@@ -834,7 +894,7 @@ pub(super) fn control(
         // SWIMMING test (`0x7c6f91`). A left-drag orbit steers nothing. It is written per mouse
         // motion (event `0x400500cb`), not per frame, so other writers survive a still mouse. The
         // aim includes the pivot bias, as `0x5103e0` passes `[cam+0x104] + [cam+0xf4]`.
-        if hands_off {
+        if hands_off && !gamepad_owns_swim_pitch {
             swim::hand_off_pitch(&mut player, cam.pitch + rig.smart_pivot.bias());
             if let Some(call) = speed_capsule.13.as_deref_mut() {
                 call.frame_wrote();
@@ -866,6 +926,7 @@ pub(super) fn control(
                 surface_y,
                 (move_fwd, move_right),
                 (swim_fwd, swim_side),
+                swimming && may_translate && binding_latches.sit_or_stand_down(),
                 mover_speeds,
                 move_speed,
                 if translating { drunk_wobble } else { 0.0 },

@@ -60,6 +60,7 @@ mod field_watch;
 mod fishing_line;
 mod footprints;
 mod game_plugins;
+mod gamepad;
 mod glue_session;
 mod go_anim;
 mod go_templates;
@@ -273,6 +274,13 @@ fn launch(build: BuildId, extend: Option<Extension<'_>>) -> AppExit {
     // A dev build's install, state folder and probe identity resolve from the launcher's folder,
     // so a crate on top of benilla keeps them in its own and not in cargo's checkout of benilla.
     benilla_formats::set_project_folder(build.project_dir);
+    // iOS bundles are read-only; seed the writable app container before resolving
+    // WoW Data or registering the player's loose AddOns.
+    #[cfg(target_os = "ios")]
+    {
+        benilla_formats::prepare_ios_data();
+        benilla_formats::prepare_ios_addons();
+    }
     if run_mode::unattended() && std::env::var_os("BENILLA_HOME").is_none() {
         // Before the logger exists; whoever reads what the run wrote needs the folder.
         if let Some(home) = local_state::home() {
@@ -296,9 +304,16 @@ fn launch(build: BuildId, extend: Option<Extension<'_>>) -> AppExit {
         Err(err) => return no_install::fail(&err, run_mode::unattended()),
     };
 
+    // SDL HID enumeration must happen before Bevy/winit starts its event loop.
+    // SDL objects are !Send on macOS, so the live handle is stored as a NonSend resource.
+    let sdl_gamepad = crate::gamepad::init_platform_gamepad();
+
     let mut app = App::new();
     // A command on an entity a same-frame despawn removed logs instead of aborting the session.
     app.set_error_handler(crash::command_error_handler);
+    if let Some(gamepad) = sdl_gamepad {
+        app.insert_non_send_resource(gamepad);
+    }
     // The panel footer and the build banner read the stamp back.
     app.insert_resource(build);
     // Static-scene transform tracking pinned on: the default threshold re-decides every frame with

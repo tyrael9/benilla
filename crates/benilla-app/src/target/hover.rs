@@ -801,13 +801,77 @@ impl ObjectPicker<'_, '_> {
         let mouse_debug = mouse_pick_debug_enabled();
 
         // Pass 1: the exact resident geometry, nearest wins.
-        let mut best: Option<(f32, Entity)> =
-            benilla_world::interact::cast_pick_ray(ray, pickable, parts, false)
-                .into_iter()
-                .next()
-                .map(|(e, h)| (h.distance, e));
+        let exact_hits =
+            benilla_world::interact::cast_pick_ray(ray, pickable, parts, false);
+        let mut best: Option<(f32, Entity)> = exact_hits
+            .first()
+            .map(|(e, h)| (h.distance, *e));
         let exact = best;
         let mut inflated = None;
+
+        // With mouse-pick diagnostics enabled, report the ordered resident-geometry hits, not
+        // only the nearest one. This makes it possible to see a closed/opened door in front of
+        // the chest it visually reveals, and whether the front object would pass mouseover.
+        if mouse_debug {
+            let mut seen = HashSet::new();
+            let rows: Vec<String> = exact_hits
+                .iter()
+                .filter_map(|(part, hit)| {
+                    let net = resolve_net(*part);
+                    if !seen.insert(net) {
+                        return None;
+                    }
+                    let guid = guids
+                        .get(net)
+                        .ok()
+                        .map_or_else(|| "?".to_string(), |g| format!("{:#x}", g.0));
+                    let Some(store) = stores.get(net).ok() else {
+                        return Some(format!(
+                            "{:.2}yd guid={} store=unavailable",
+                            hit.distance, guid
+                        ));
+                    };
+                    let tmpl = go_gate.templates.of(&store.0);
+                    let reaction = crate::target::cursor_mode::go_reaction(
+                        go_gate.factions.as_deref(),
+                        store.0.gameobject_faction(),
+                        self_store,
+                    );
+                    let eligible = crate::target::cursor_mode::mouseover_eligible(
+                        store.0.gameobject_type_id(),
+                        store.0.gameobject_flags(),
+                        store.0.gameobject_dynamic_flags(),
+                        tmpl.map(|t| t.highlight_column),
+                        reaction,
+                        crate::target::cursor_mode::GoOverrides {
+                            channel_owned: crate::target::cursor_mode::fishing_channel_owned(
+                                self_store,
+                                Some(guids.get(net).ok().map_or(0, |g| g.0)),
+                            ),
+                            meeting_stone_queued: crate::target::cursor_mode::meeting_stone_queued(
+                                tmpl.and_then(|t| t.meeting_stone).map(|m| m.area),
+                                go_gate.queued_area(),
+                            ),
+                        },
+                    );
+                    Some(format!(
+                        "{:.2}yd guid={} name={:?} type={} flags={:#x} dyn={:#x} eligible={}",
+                        hit.distance,
+                        guid,
+                        tmpl.map(|t| t.name.as_str()),
+                        store.0.gameobject_type_id(),
+                        store.0.gameobject_flags(),
+                        store.0.gameobject_dynamic_flags(),
+                        eligible,
+                    ))
+                })
+                .take(8)
+                .collect();
+            cache.report.say_mouse_pick(format!(
+                "ray_go_hits[nearest-first]={}",
+                if rows.is_empty() { "none".to_string() } else { rows.join(" | ") }
+            ));
+        }
 
         // Pass 2, only when nothing hit anywhere, units included (one resolve in the reference):
         // the geometry pushed 1 model unit along its normals, a halo of about a yard that makes a

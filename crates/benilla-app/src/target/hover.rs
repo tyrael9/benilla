@@ -24,6 +24,13 @@ use benilla_world::view::WorldCamera;
 
 use super::{Hovered, HoveredObject, PickOcclusion};
 
+/// Opt-in diagnostics for the physical mouse's GameObject pick. Set
+/// `WOW_MOUSE_PICK_DEBUG=1` to compare the geometry hit with the world occlusion trace.
+fn mouse_pick_debug_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("WOW_MOUSE_PICK_DEBUG").is_some())
+}
+
 /// What the world trace casts against, as one [`SystemParam`]: the reference's `CWorld::Intersect`
 /// leg of the scene trace (`0x480df0`, mask `0x1000114`): the [`PickOccluder`] colliders, terrain
 /// and the WMO walk-bake faces (about the `0x84` reject mask), and the static doodads' drawn
@@ -791,12 +798,16 @@ impl ObjectPicker<'_, '_> {
             );
         }
 
+        let mouse_debug = mouse_pick_debug_enabled();
+
         // Pass 1: the exact resident geometry, nearest wins.
         let mut best: Option<(f32, Entity)> =
             benilla_world::interact::cast_pick_ray(ray, pickable, parts, false)
                 .into_iter()
                 .next()
                 .map(|(e, h)| (h.distance, e));
+        let exact = best;
+        let mut inflated = None;
 
         // Pass 2, only when nothing hit anywhere, units included (one resolve in the reference):
         // the geometry pushed 1 model unit along its normals, a halo of about a yard that makes a
@@ -805,6 +816,17 @@ impl ObjectPicker<'_, '_> {
         // hold a GameObject over a unit's halo; here the unit wins that pick.
         if best.is_none() {
             if unit_hovered.target.is_some() {
+                if mouse_debug {
+                    cache.report.say_mouse_pick(format!(
+                        "cursor=({:.0},{:.0}) exact=none inflated=skipped unit_hover={:?}                          occlusion={:.2}yd point={:?} ray_dir={:?} outcome=unit-hover-keeps-halo-shut",
+                        cursor.x,
+                        cursor.y,
+                        unit_hovered.target,
+                        occlusion.distance,
+                        occlusion.point,
+                        *ray.direction,
+                    ));
+                }
                 *sticky = None;
                 return nothing;
             }
@@ -829,6 +851,9 @@ impl ObjectPicker<'_, '_> {
                                 self_store, go_guid,
                             ),
                             meeting_stone_queued: crate::target::cursor_mode::meeting_stone_queued(
+                                self_store, go_guid,
+                            ),
+                            meeting_stone_queued: crate::target::cursor_mode::meeting_stone_queued(
                                 go_gate
                                     .templates
                                     .of(&s.0)
@@ -848,11 +873,64 @@ impl ObjectPicker<'_, '_> {
                     best2 = Some((hit.distance, prio, part));
                 }
             }
-            best = best2.map(|(t, _, e)| (t, e));
+            inflated = best2.map(|(t, _, e)| (t, e));
+            best = inflated;
+        }
+
+        // Compare the resident GameObject geometry with the independent world trace before
+        // applying the occlusion gate. This is opt-in and say-on-change, so it remains quiet in
+        // normal play and produces useful angle-by-angle samples without a per-frame log flood.
+        let geometry_hit = best;
+        let occluded = geometry_hit.is_some_and(|(t, _)| occlusion.distance < t);
+        if mouse_debug {
+            let describe_hit = |hit: Option<(f32, Entity)>| -> String {
+                let Some((distance, part)) = hit else {
+                    return "none".to_string();
+                };
+                let net = resolve_net(part);
+                let guid = guids
+                    .get(net)
+                    .ok()
+                    .map_or_else(|| "?".to_string(), |g| format!("{:#x}", g.0));
+                let go_type = stores
+                    .get(net)
+                    .ok()
+                    .map_or_else(|| "?".to_string(), |s| s.0.gameobject_type_id().to_string());
+                let part_position = parts
+                    .get(part)
+                    .ok()
+                    .map(|(_, gt, _, _, _, _)| gt.translation());
+                format!(
+                    "{distance:.2}yd part={part:?} net={net:?} guid={guid}                      go_type={go_type} pos={part_position:?}"
+                )
+            };
+            let direction = *ray.direction;
+            let outcome = if occluded {
+                "blocked-by-world"
+            } else if geometry_hit.is_some() {
+                "geometry-hit"
+            } else {
+                "mesh-miss"
+            };
+            cache.report.say_mouse_pick(format!(
+                "cursor=({:.0},{:.0}) ray_dir=({:.2},{:.2},{:.2}) exact=[{}]                  inflated=[{}] occlusion={:.2}yd point={:?} blocked={}                  unit_hover={:?} outcome={}",
+                cursor.x,
+                cursor.y,
+                direction.x,
+                direction.y,
+                direction.z,
+                describe_hit(exact),
+                describe_hit(inflated),
+                occlusion.distance,
+                occlusion.point,
+                occluded,
+                unit_hovered.target,
+                outcome,
+            ));
         }
 
         // Occlusion (`0x480eb4`): a strictly nearer world hit drops the pick, a tie keeps it.
-        if best.is_some_and(|(t, _)| occlusion.distance < t) {
+        if occluded {
             best = None;
         }
         let picked = best.map(|(t, e)| (t, resolve_net(e)));

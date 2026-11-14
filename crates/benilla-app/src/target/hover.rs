@@ -818,7 +818,7 @@ impl ObjectPicker<'_, '_> {
             if unit_hovered.target.is_some() {
                 if mouse_debug {
                     cache.report.say_mouse_pick(format!(
-                        "cursor=({:.0},{:.0}) exact=none inflated=skipped unit_hover={:?}                          occlusion={:.2}yd point={:?} ray_dir={:?} outcome=unit-hover-keeps-halo-shut",
+                        "cursor=({:.0},{:.0}) exact=none inflated=skipped unit_hover={:?} occlusion={:.2}yd point={:?} ray_dir={:?} outcome=unit-hover-keeps-halo-shut",
                         cursor.x,
                         cursor.y,
                         unit_hovered.target,
@@ -898,7 +898,7 @@ impl ObjectPicker<'_, '_> {
                     .ok()
                     .map(|(_, gt, _, _, _, _)| gt.translation());
                 format!(
-                    "{distance:.2}yd part={part:?} net={net:?} guid={guid}                      go_type={go_type} pos={part_position:?}"
+                    "{distance:.2}yd part={part:?} net={net:?} guid={guid} go_type={go_type} pos={part_position:?}"
                 )
             };
             let direction = *ray.direction;
@@ -910,7 +910,10 @@ impl ObjectPicker<'_, '_> {
                 "mesh-miss"
             };
             cache.report.say_mouse_pick(format!(
-                "cursor=({:.0},{:.0}) ray_dir=({:.2},{:.2},{:.2}) exact=[{}]                  inflated=[{}] occlusion={:.2}yd point={:?} blocked={}                  unit_hover={:?} outcome={}",
+                concat!(
+                    "cursor=({:.0},{:.0}) ray_dir=({:.2},{:.2},{:.2}) exact=[{}] inflated=[{}] ",
+                    "occlusion={:.2}yd point={:?} blocked={} unit_hover={:?} outcome={}"
+                ),
                 cursor.x,
                 cursor.y,
                 direction.x,

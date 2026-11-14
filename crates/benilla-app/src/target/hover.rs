@@ -851,9 +851,6 @@ impl ObjectPicker<'_, '_> {
                                 self_store, go_guid,
                             ),
                             meeting_stone_queued: crate::target::cursor_mode::meeting_stone_queued(
-                                self_store, go_guid,
-                            ),
-                            meeting_stone_queued: crate::target::cursor_mode::meeting_stone_queued(
                                 go_gate
                                     .templates
                                     .of(&s.0)

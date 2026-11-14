@@ -225,6 +225,15 @@ impl ProbeReport {
         info!("hover probe: {line}");
         self.last = Some(line);
     }
+
+    /// Reports an opt-in physical-mouse pick diagnostic, sharing the probe's say-on-change gate.
+    pub(super) fn say_mouse_pick(&mut self, line: String) {
+        if self.last.as_deref() == Some(line.as_str()) {
+            return;
+        }
+        info!("mouse pick debug: {line}");
+        self.last = Some(line);
+    }
 }
 
 #[cfg(test)]
